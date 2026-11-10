@@ -101,6 +101,27 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(status, 2)
         self.assertIn("invalid int value", err)
 
+    def test_rejects_negative_limits(self):
+        # Each limit is validated by argparse, so a negative value is a
+        # usage error here rather than a ValueError from pricing_json.
+        for option in ("--max-periods", "--max-peak-periods",
+                       "--max-nonpeak-periods"):
+            with self.subTest(option=option):
+                status, args, _, err = parse(["--json", option, "-1"])
+                self.assertEqual(status, 2)
+                self.assertIsNone(args)
+                self.assertIn("must not be negative", err)
+
+    def test_accepts_zero_limit(self):
+        self.assertEqual(parse(["--json", "--max-periods", "0"])[1]
+                         .max_periods, 0)
+
+    def test_accepts_negative_looking_value_after_option(self):
+        # argparse must consume "-1" as the option's value, not mistake it
+        # for an option of its own, so the error names the right option.
+        _, _, _, err = parse(["--json", "--max-periods", "-1"])
+        self.assertIn("argument --max-periods", err)
+
     def test_help_exits_zero(self):
         status, _, out, _ = parse(["--help"])
         self.assertEqual(status, 0)
@@ -116,6 +137,26 @@ class ParserTests(unittest.TestCase):
         for option in ("--gui", "--json", "--max-periods",
                        "--max-peak-periods", "--max-nonpeak-periods"):
             self.assertIn(option, out)
+
+
+class UsageErrorTests(unittest.TestCase):
+    """Usage errors must exit through argparse, not a traceback.
+
+    Before the limits were given an argparse ``type``, a negative value
+    was accepted by the parser and only rejected by
+    ``pricing_json.format_pricing_json``, so ``--max-periods -1`` printed
+    a ``ValueError`` traceback and exited 1 instead of the usage error and
+    exit status 2 that every other bad option produces.
+    """
+
+    def test_negative_limit_exits_two_without_a_traceback(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit) as caught:
+                main(["--json", "--max-periods", "-1"])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("must not be negative", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
 
 
 class JsonCommandTests(unittest.TestCase):

@@ -15,6 +15,28 @@ from deepseek_pricing import schedule
 LOOKAHEAD_PERIODS = 30
 
 
+def non_negative_int(value):
+    """argparse type for a period limit, rejecting negatives.
+
+    Without this the limits are only validated deep inside
+    ``pricing_json.format_pricing_json``, so ``--max-periods -1`` escapes
+    argparse and dies with a ``ValueError`` traceback and exit status 1.
+    Raising ``ArgumentTypeError`` instead keeps it a usage error, printed
+    as one line on stderr with exit status 2, like any other bad option.
+    """
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid int value: {value!r}"
+        ) from None
+    if number < 0:
+        raise argparse.ArgumentTypeError(
+            f"must not be negative: {value!r}"
+        )
+    return number
+
+
 def build_parser():
     """Build the command line parser for the ``deepseek-alert`` command."""
     parser = argparse.ArgumentParser(
@@ -37,21 +59,21 @@ def build_parser():
     )
     parser.add_argument(
         "--max-periods",
-        type=int,
+        type=non_negative_int,
         default=None,
         metavar="N",
         help="emit at most N periods (default: 5, JSON only)",
     )
     parser.add_argument(
         "--max-peak-periods",
-        type=int,
+        type=non_negative_int,
         default=None,
         metavar="N",
         help="stop after N peak periods (default: --max-periods)",
     )
     parser.add_argument(
         "--max-nonpeak-periods",
-        type=int,
+        type=non_negative_int,
         default=None,
         metavar="N",
         help="stop after N non-peak periods (default: --max-periods)",
