@@ -20,6 +20,27 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Verify the published pricing rules
+        # The unit tests stub this check out so they stay offline and
+        # deterministic, which leaves the real call unexercised. It runs
+        # here, unstubbed, so CI fails in two cases that matter:
+        # the documentation cannot be fetched at all, and the paragraph
+        # the schedule implements is gone or has been reworded.
+        run: |
+          uv run python - <<'PY'
+          import sys
+
+          from deepseek_pricing import pricing_doc
+
+          try:
+              pricing_doc.verify_published_rules()
+          except pricing_doc.PricingDocError as error:
+              print("pricing rules check failed:", file=sys.stderr)
+              print(error, file=sys.stderr)
+              sys.exit(1)
+          print(f"pricing rules confirmed at {pricing_doc.PRICING_DOC_URL}")
+          PY
+
       - name: Check PEP 8 compliance
         run: uv run python scripts/dev.py pycodestyle
 
@@ -32,6 +53,11 @@ jobs:
     # `json` command must work without it. tkinter is blocked explicitly
     # here rather than relying on the runner image lacking it, so this job
     # proves the same thing on every runner.
+    #
+    # The `json` run below performs the published-rules check for real, so
+    # this job also fails when the documentation is unreachable or the
+    # paragraph has changed. That is intended: the command now refuses to
+    # run in those cases, and CI should see the same failure a user would.
     runs-on: ubuntu-latest
 
     steps:

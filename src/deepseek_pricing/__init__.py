@@ -8,7 +8,7 @@ import argparse
 import sys
 from datetime import datetime
 
-from deepseek_pricing import schedule
+from deepseek_pricing import pricing_doc, schedule
 
 # How far the JSON output may walk the iterator. The period limits decide
 # what is actually emitted; this only bounds the search so a large
@@ -50,6 +50,10 @@ def iso8601_with_offset(value):
 
     ``Z`` is accepted: it is the ISO 8601 designator for UTC, and
     ``fromisoformat`` turns it into a UTC ``tzinfo``.
+
+    The result is converted to UTC. The peak hours are published in UTC,
+    so the output is always reported in UTC; accepting ``+08:00`` here
+    means "this instant", not "report in +08:00".
     """
     try:
         timestamp = datetime.fromisoformat(value)
@@ -61,7 +65,7 @@ def iso8601_with_offset(value):
         raise argparse.ArgumentTypeError(
             f"timestamp needs a UTC offset, like +08:00 or Z: {value!r}"
         )
-    return timestamp
+    return timestamp.astimezone(schedule.UTC)
 
 
 def build_parser():
@@ -69,8 +73,9 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="deepseek-alert",
         description=(
-            "Show when DeepSeek is in peak pricing. Weekends and Chinese "
-            "public holidays are always off-peak."
+            "Show when DeepSeek is in peak pricing. Peak hours are "
+            "01:00-04:00 and 06:00-10:00 UTC; weekends and Chinese public "
+            "holidays are always off-peak."
         ),
     )
     subparsers = parser.add_subparsers(
@@ -124,6 +129,28 @@ def build_parser():
     return parser
 
 
+def verify_published_rules(error_file=None):
+    """Confirm the published pricing rules still match ``schedule``.
+
+    This runs before either command does any work: the local schedule is
+    only meaningful while the documentation still states the rule it was
+    built from. ``--help`` and a bare invocation skip it, so reading the
+    usage text never depends on the network.
+
+    Returns 0 when the rules are confirmed and 1 when they are not, with
+    the reason printed rather than raised - a traceback would bury the
+    one line that tells the user what to do.
+    """
+    if error_file is None:
+        error_file = sys.stderr
+    try:
+        pricing_doc.verify_published_rules()
+    except pricing_doc.PricingDocError as error:
+        print(f"deepseek-alert: {error}", file=error_file)
+        return 1
+    return 0
+
+
 def run_gui():
     """Start the monitor window.
 
@@ -158,13 +185,17 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.command is None:
+        parser.print_help()
+        return 0
+
+    status = verify_published_rules()
+    if status:
+        return status
+
     if args.command == "gui":
         return run_gui()
-    if args.command == "json":
-        return run_json(args)
-
-    parser.print_help()
-    return 0
+    return run_json(args)
 
 
 if __name__ == "__main__":

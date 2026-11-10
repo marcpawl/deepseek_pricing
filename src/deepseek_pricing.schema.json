@@ -34,12 +34,12 @@
         "startTime": {
           "type": "string",
           "format": "date-time",
-          "description": "Start time (ISO 8601, with a UTC offset)"
+          "description": "Start time (ISO 8601, in UTC, so the offset is +00:00)"
         },
         "endTime": {
           "type": "string",
           "format": "date-time",
-          "description": "End time (ISO 8601, with a UTC offset)"
+          "description": "End time (ISO 8601, in UTC, so the offset is +00:00)"
         },
         "pricing": {
           "$ref": "#/definitions/Pricing"

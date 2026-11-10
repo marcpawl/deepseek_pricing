@@ -21,8 +21,11 @@ from deepseek_pricing import schedule  # noqa: E402
 
 SCHEMA_PATH = SRC_DIR / "deepseek_pricing.schema.json"
 UTC = ZoneInfo("UTC")
-# Tuesday 2026-11-10 02:00 UTC is non-peak; peak starts at 17:00 UTC.
-WORKDAY = datetime(2026, 11, 10, 2, 0, tzinfo=UTC)
+# Tuesday 2026-11-10 05:00 UTC is non-peak: it sits between the
+# 01:00-04:00 and 06:00-10:00 peak windows, so the next period is peak.
+WORKDAY = datetime(2026, 11, 10, 5, 0, tzinfo=UTC)
+# Monday 2026-11-09 02:00 UTC is inside the first peak window.
+PEAK_TIME = datetime(2026, 11, 9, 2, 0, tzinfo=UTC)
 
 
 def schema():
@@ -112,9 +115,8 @@ class LimitsTests(unittest.TestCase):
         )
 
     def test_starting_on_peak_with_peak_limit_zero(self):
-        peak_now = datetime(2026, 11, 9, 17, 30, tzinfo=UTC)
         self.assertEqual(
-            document(schedule_periods(now=peak_now), max_peak_periods=0),
+            document(schedule_periods(now=PEAK_TIME), max_peak_periods=0),
             {"version": 1, "periods": []},
         )
 
@@ -165,9 +167,8 @@ class OutputTests(unittest.TestCase):
                             schema=schema())
 
     def test_matches_schema_from_peak(self):
-        peak_now = datetime(2026, 11, 9, 17, 30, tzinfo=UTC)
         jsonschema.validate(
-            instance=document(schedule_periods(now=peak_now),
+            instance=document(schedule_periods(now=PEAK_TIME),
                               max_periods=4),
             schema=schema(),
         )

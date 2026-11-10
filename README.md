@@ -2,9 +2,16 @@
 Indicate the schedule (start time, end time) for when Deepseek is 
 in peak pricing
 
-Pricing is evaluated in Beijing time. Weekends and Chinese public
+Pricing is evaluated in UTC, as published: weekends and Chinese public
 holidays are always off-peak; on other days 01:00-04:00 and 06:00-10:00
-Beijing time are peak.
+UTC are peak.
+
+Both commands check the DeepSeek documentation at startup. The rules
+above are copied from one paragraph of the published pricing page, so
+`json` and `gui` refuse to run if that paragraph is missing or has been
+reworded - a change there means the local schedule has to be reviewed,
+not guessed at. `--help` and a bare invocation skip the check, so the
+usage text never needs the network.
 
 The command is installed as `deepseek-alert`. It can also be run straight
 from the source tree, which is what the examples below do.
@@ -44,18 +51,18 @@ For example:
   "version": 1,
   "periods": [
     {
-      "startTime": "2026-11-10T23:15:00+08:00",
-      "endTime": "2026-11-11T01:00:00+08:00",
+      "startTime": "2026-11-10T15:15:00+00:00",
+      "endTime": "2026-11-11T01:00:00+00:00",
       "pricing": "NONPEAK"
     },
     {
-      "startTime": "2026-11-11T01:00:00+08:00",
-      "endTime": "2026-11-11T04:00:00+08:00",
+      "startTime": "2026-11-11T01:00:00+00:00",
+      "endTime": "2026-11-11T04:00:00+00:00",
       "pricing": "PEAK"
     },
     {
-      "startTime": "2026-11-11T04:00:00+08:00",
-      "endTime": "2026-11-11T06:00:00+08:00",
+      "startTime": "2026-11-11T04:00:00+00:00",
+      "endTime": "2026-11-11T06:00:00+00:00",
       "pricing": "NONPEAK"
     }
   ]
@@ -71,8 +78,11 @@ offset, either numeric (`+08:00`, `-05:00`, `+0000`) or `Z` for UTC. A
 timestamp with no offset, such as `2026-11-10T23:15`, is rejected:
 without an offset the instant is ambiguous.
 
-The periods are reported in the offset that was given, so a `Z` timestamp
-yields `+00:00` timestamps.
+The periods are always reported in UTC, with a `+00:00` offset, because
+that is the unit the peak hours are published in. An offset in
+`--start-at` therefore says which instant to start from, not which offset
+to print: `2026-11-10T23:15:00+08:00` and `2026-11-10T15:15:00Z` name the
+same instant and produce the same output.
 
 There are options to change the number of periods that is returned
 in the JSON. See `json --help`.

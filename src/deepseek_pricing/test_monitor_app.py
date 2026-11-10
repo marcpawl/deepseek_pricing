@@ -34,26 +34,26 @@ class StatusColorTests(unittest.TestCase):
 
     def test_peak_is_red(self):
         app = make_app()
-        self.assertEqual(app.compute_color(utc(2026, 11, 9, 17, 30)), "red")
+        self.assertEqual(app.compute_color(utc(2026, 11, 9, 2, 0)), "red")
 
     def test_far_from_peak_is_green(self):
         app = make_app()
-        self.assertEqual(app.compute_color(utc(2026, 11, 10, 2, 0)), "green")
+        self.assertEqual(app.compute_color(utc(2026, 11, 10, 0, 0)), "green")
 
     def test_within_warning_window_is_yellow(self):
         app = make_app()
-        # Non-peak ends and peak starts at 17:00 UTC.
-        self.assertEqual(app.compute_color(utc(2026, 11, 10, 16, 50)),
+        # The 01:00 UTC window opens at 01:00, so 00:50 is ten minutes out.
+        self.assertEqual(app.compute_color(utc(2026, 11, 10, 0, 50)),
                          "yellow")
 
     def test_just_outside_warning_window_is_green(self):
         app = make_app()
-        self.assertEqual(app.compute_color(utc(2026, 11, 10, 16, 44)),
+        self.assertEqual(app.compute_color(utc(2026, 11, 10, 0, 44)),
                          "green")
 
     def test_weekend_is_green(self):
         app = make_app()
-        self.assertEqual(app.compute_color(utc(2026, 11, 7, 17, 30)),
+        self.assertEqual(app.compute_color(utc(2026, 11, 7, 1, 30)),
                          "green")
 
 
@@ -75,20 +75,21 @@ class NonPeakWindowTests(unittest.TestCase):
 
     def test_first_window_contains_now_when_non_peak(self):
         app = make_app()
-        now = utc(2026, 11, 10, 2, 0)
+        now = utc(2026, 11, 10, 5, 0)
         windows = app.get_next_non_peak_windows(now, count=1)
         self.assertEqual(windows[0][0], now)
 
     def test_peak_now_skips_to_next_non_peak(self):
         app = make_app()
-        windows = app.get_next_non_peak_windows(utc(2026, 11, 9, 17, 30),
+        # 02:00 UTC is inside the 01:00-04:00 window, which closes at 04:00.
+        windows = app.get_next_non_peak_windows(utc(2026, 11, 10, 2, 0),
                                                 count=1)
-        self.assertEqual(windows[0][0], utc(2026, 11, 9, 20, 0))
+        self.assertEqual(windows[0][0], utc(2026, 11, 10, 4, 0))
 
     def test_count_is_respected(self):
         app = make_app()
         for count in (0, 1, 5):
-            windows = app.get_next_non_peak_windows(utc(2026, 11, 10, 2, 0),
+            windows = app.get_next_non_peak_windows(utc(2026, 11, 10, 5, 0),
                                                     count=count)
             self.assertEqual(len(windows), count)
 
@@ -103,7 +104,7 @@ class PricingPeriodHelperTests(unittest.TestCase):
 
     def test_helper_mirrors_schedule_iterator(self):
         app = make_app()
-        now = utc(2026, 11, 10, 2, 0)
+        now = utc(2026, 11, 10, 5, 0)
         expected = list(schedule.pricing_periods(3, now))
         actual = app.get_pricing_periods(now, count=3)
         self.assertEqual(
@@ -155,7 +156,7 @@ from deepseek_pricing import gui
 app = object.__new__(gui.DeepSeekMonitorApp)
 from datetime import datetime
 from zoneinfo import ZoneInfo
-now = datetime(2026, 11, 10, 2, 0, tzinfo=ZoneInfo("UTC"))
+now = datetime(2026, 11, 10, 0, 0, tzinfo=ZoneInfo("UTC"))
 print(app.compute_color(now))
 print(len(app.get_next_non_peak_windows(now)))
 """

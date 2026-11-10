@@ -7,6 +7,7 @@ taken on trust: this module pulls the command and the sample out of the
 markdown, runs the command, and compares the result byte for byte.
 """
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -62,13 +63,32 @@ def command_argv(body):
 
     ``\\`` joins the wrapped lines of the command. The ``uv run`` prefix
     is dropped and the script is run with the current interpreter, so the
-    check does not depend on uv being installed or on network access.
+    check does not depend on uv being installed.
     """
     argv = shlex.split(body.replace("\\\n", " "))
     if argv[:2] != ["uv", "run"]:
         raise AssertionError(f"expected a 'uv run' command, got: {body!r}")
-    argv = argv[2:]
-    return [sys.executable, *argv]
+    return argv[2:]
+
+
+# The command verifies the DeepSeek documentation before printing, and it
+# then runs in a subprocess where a stub cannot be patched in from here.
+# The check is replaced before ``main`` runs, so the comparison is about
+# the sample, not about the network. Anything else about the run is still
+# the real command.
+STUB_RUNNER = """\
+import sys
+sys.argv = {argv!r}
+from deepseek_pricing import pricing_doc
+pricing_doc.verify_published_rules = lambda *args, **kwargs: None
+from deepseek_pricing import main
+sys.exit(main())
+"""
+
+
+def runner_argv(script_argv):
+    """Wrap a documented command so the rules check is stubbed out."""
+    return [sys.executable, "-c", STUB_RUNNER.format(argv=script_argv)]
 
 
 class ReadmeJsonSampleTests(unittest.TestCase):
@@ -77,12 +97,17 @@ class ReadmeJsonSampleTests(unittest.TestCase):
         self.text = README.read_text()
 
     def run_documented_command(self):
-        argv = command_argv(command_block(self.text))
+        script_argv = command_argv(command_block(self.text))
+        environment = dict(os.environ)
+        # ``-c`` leaves the working directory off sys.path, so the sources
+        # under src/ have to be named explicitly.
+        environment["PYTHONPATH"] = str(REPO_ROOT / "src")
         result = subprocess.run(
-            argv,
+            runner_argv(script_argv),
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
+            env=environment,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")

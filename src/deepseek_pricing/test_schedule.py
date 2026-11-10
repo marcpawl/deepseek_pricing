@@ -23,16 +23,31 @@ def utc(*args):
 
 class PricingRulesTests(unittest.TestCase):
 
-    def test_weekday_boundaries_follow_beijing_hours(self):
-        # Beijing peak windows are 01:00-04:00 and 06:00-10:00, i.e.
-        # 17:00-20:00 and 22:00-02:00 UTC.
-        self.assertTrue(schedule.is_peak(utc(2026, 11, 9, 17, 0)))
-        self.assertTrue(schedule.is_peak(utc(2026, 11, 9, 19, 59)))
-        self.assertFalse(schedule.is_peak(utc(2026, 11, 9, 20, 0)))
-        self.assertFalse(schedule.is_peak(utc(2026, 11, 9, 21, 59)))
-        self.assertTrue(schedule.is_peak(utc(2026, 11, 9, 22, 0)))
-        self.assertTrue(schedule.is_peak(utc(2026, 11, 10, 1, 59)))
-        self.assertFalse(schedule.is_peak(utc(2026, 11, 10, 2, 0)))
+    def test_weekday_boundaries_follow_utc_hours(self):
+        # The documented windows are 01:00-04:00 and 06:00-10:00 UTC.
+        self.assertFalse(schedule.is_peak(utc(2026, 11, 10, 0, 59)))
+        self.assertTrue(schedule.is_peak(utc(2026, 11, 10, 1, 0)))
+        self.assertTrue(schedule.is_peak(utc(2026, 11, 10, 3, 59)))
+        self.assertFalse(schedule.is_peak(utc(2026, 11, 10, 4, 0)))
+        self.assertFalse(schedule.is_peak(utc(2026, 11, 10, 5, 59)))
+        self.assertTrue(schedule.is_peak(utc(2026, 11, 10, 6, 0)))
+        self.assertTrue(schedule.is_peak(utc(2026, 11, 10, 9, 59)))
+        self.assertFalse(schedule.is_peak(utc(2026, 11, 10, 10, 0)))
+
+    def test_the_documented_windows_are_peak_every_weekday(self):
+        # 2026-11-09 is a Monday; every documented hour is peak.
+        for hour in (1, 2, 3, 6, 7, 8, 9):
+            with self.subTest(hour=hour):
+                self.assertTrue(schedule.is_peak(utc(2026, 11, 9, hour, 30)))
+
+    def test_evening_utc_is_not_peak(self):
+        # 17:00-02:00 UTC used to be peak when the hours were read as
+        # Beijing time; under the documented UTC rule it is off-peak.
+        for hour in (17, 19, 22, 23, 0):
+            with self.subTest(hour=hour):
+                self.assertFalse(
+                    schedule.is_peak(utc(2026, 11, 10, hour, 30))
+                )
 
     def test_weekend_is_never_peak(self):
         # 2026-11-07 is a Saturday.
@@ -44,6 +59,7 @@ class PricingRulesTests(unittest.TestCase):
 
     def test_is_peak_accepts_other_timezones(self):
         beijing = ZoneInfo("Asia/Shanghai")
+        # Beijing 09:30 is 01:30 UTC, inside the first window.
         self.assertTrue(schedule.is_peak(datetime(2026, 11, 10, 9, 30,
                                                   tzinfo=beijing)))
 
@@ -51,36 +67,39 @@ class PricingRulesTests(unittest.TestCase):
 class BoundaryTests(unittest.TestCase):
 
     def test_next_boundary_mid_peak(self):
-        # Beijing 01:30 is inside the 01:00-04:00 window -> 04:00.
-        boundary = schedule.next_boundary(utc(2026, 11, 9, 17, 30))
-        self.assertEqual(boundary, utc(2026, 11, 9, 20, 0))
+        # 01:30 UTC is inside the 01:00-04:00 window -> 04:00.
+        boundary = schedule.next_boundary(utc(2026, 11, 10, 1, 30))
+        self.assertEqual(boundary, utc(2026, 11, 10, 4, 0))
 
     def test_next_boundary_mid_non_peak(self):
-        # Beijing 05:00 sits between windows -> 06:00.
-        boundary = schedule.next_boundary(utc(2026, 11, 9, 21, 0))
-        self.assertEqual(boundary, utc(2026, 11, 9, 22, 0))
+        # 05:00 UTC sits between windows -> 06:00.
+        boundary = schedule.next_boundary(utc(2026, 11, 10, 5, 0))
+        self.assertEqual(boundary, utc(2026, 11, 10, 6, 0))
 
     def test_next_boundary_before_peak(self):
-        # Beijing 00:30 -> the 01:00 window start.
-        boundary = schedule.next_boundary(utc(2026, 11, 9, 16, 30))
-        self.assertEqual(boundary, utc(2026, 11, 9, 17, 0))
+        # 00:30 UTC -> the 01:00 window start.
+        boundary = schedule.next_boundary(utc(2026, 11, 10, 0, 30))
+        self.assertEqual(boundary, utc(2026, 11, 10, 1, 0))
 
     def test_next_boundary_after_last_peak(self):
-        # Beijing 19:00 is after both windows -> next Beijing midnight.
+        # 11:00 UTC is after both windows -> next UTC midnight.
         boundary = schedule.next_boundary(utc(2026, 11, 10, 11, 0))
-        self.assertEqual(boundary, utc(2026, 11, 10, 16, 0))
+        self.assertEqual(boundary, utc(2026, 11, 11, 0, 0))
 
     def test_find_boundary_skips_non_peak_day(self):
-        # Saturday is all non-peak; the first change is Monday 01:00
-        # Beijing = Sunday 17:00 UTC.
+        # Saturday is all non-peak; the first change is Monday 01:00 UTC.
         boundary = schedule.find_boundary(utc(2026, 11, 7, 5, 0))
-        self.assertEqual(boundary, utc(2026, 11, 8, 17, 0))
+        self.assertEqual(boundary, utc(2026, 11, 9, 1, 0))
 
     def test_find_boundary_ends_at_peak_start(self):
-        # Beijing 10:00 is between windows; the next change is the start
-        # of the 17:00 UTC window, five non-peak hours later.
-        boundary = schedule.find_boundary(utc(2026, 11, 10, 2, 0))
-        self.assertEqual(boundary, utc(2026, 11, 10, 17, 0))
+        # 00:00 UTC is off-peak; the next change is the 01:00 window.
+        boundary = schedule.find_boundary(utc(2026, 11, 10, 0, 0))
+        self.assertEqual(boundary, utc(2026, 11, 10, 1, 0))
+
+    def test_find_boundary_across_utc_midnight(self):
+        # 23:00 UTC on a weekday is off-peak until the next day's 01:00.
+        boundary = schedule.find_boundary(utc(2026, 11, 10, 23, 0))
+        self.assertEqual(boundary, utc(2026, 11, 11, 1, 0))
 
     def test_find_boundary_always_changes_state(self):
         for start in (
@@ -88,6 +107,7 @@ class BoundaryTests(unittest.TestCase):
             utc(2026, 11, 10, 1, 0),
             utc(2026, 11, 10, 5, 0),
             utc(2026, 11, 10, 9, 0),
+            utc(2026, 11, 10, 14, 0),
             utc(2026, 11, 14, 12, 0),
         ):
             with self.subTest(start=start):
@@ -107,16 +127,21 @@ class PricingPeriodsIteratorTests(unittest.TestCase):
         self.assertNotIsInstance(periods, (list, tuple, dict))
 
     def test_current_peak_period_is_included(self):
-        # Beijing 01:30 is peak, ending when the 04:00 window closes.
-        periods = list(schedule.pricing_periods(3, utc(2026, 11, 9, 17, 30)))
+        # 02:00 UTC is inside the 01:00-04:00 window, which closes at 04:00.
+        periods = list(schedule.pricing_periods(3, utc(2026, 11, 10, 2, 0)))
         self.assertEqual(periods[0]["startTime"],
-                         utc(2026, 11, 9, 17, 30).isoformat())
+                         utc(2026, 11, 10, 2, 0).isoformat())
         self.assertEqual(periods[0]["endTime"],
-                         utc(2026, 11, 9, 20, 0).isoformat())
+                         utc(2026, 11, 10, 4, 0).isoformat())
         self.assertEqual(periods[0]["pricing"], "PEAK")
 
     def test_current_non_peak_period_is_included(self):
-        period = next(schedule.pricing_periods(1, utc(2026, 11, 10, 2, 0)))
+        # 05:00 UTC sits between the two windows, ending at 06:00.
+        period = next(schedule.pricing_periods(1, utc(2026, 11, 10, 5, 0)))
+        self.assertEqual(period["startTime"],
+                         utc(2026, 11, 10, 5, 0).isoformat())
+        self.assertEqual(period["endTime"],
+                         utc(2026, 11, 10, 6, 0).isoformat())
         self.assertEqual(period["pricing"], "NONPEAK")
 
     def test_periods_are_contiguous_and_alternate(self):

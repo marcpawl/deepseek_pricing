@@ -17,7 +17,7 @@ import jsonschema  # noqa: E402
 
 import deepseek_pricing  # noqa: E402
 from deepseek_pricing import main  # noqa: E402
-from deepseek_pricing.schedule import BEIJING  # noqa: E402
+from deepseek_pricing.schedule import UTC  # noqa: E402
 
 SCHEMA_PATH = SRC_DIR / "deepseek_pricing.schema.json"
 
@@ -27,15 +27,39 @@ def schema():
     return json.loads(SCHEMA_PATH.read_text())
 
 
+@contextlib.contextmanager
+def stubbed_rules_check(replacement=None):
+    """Replace the published-rules check for the duration of a test.
+
+    The check fetches the DeepSeek documentation, so a test that runs a
+    command must stub it. ``replacement`` is what
+    ``pricing_doc.verify_published_rules`` becomes; by default it is a
+    no-op that confirms the rules.
+    """
+    if replacement is None:
+        def replacement():
+            return None
+    original = deepseek_pricing.pricing_doc.verify_published_rules
+    deepseek_pricing.pricing_doc.verify_published_rules = replacement
+    try:
+        yield replacement
+    finally:
+        deepseek_pricing.pricing_doc.verify_published_rules = original
+
+
 def run(argv):
     """Run the CLI and return the status with its stdout and stderr.
 
     argparse writes help to stdout and usage errors to stderr, so both
-    are captured to keep the test output readable.
+    are captured to keep the test output readable. The published-rules
+    check is stubbed out: it is a network call, and the tests that care
+    about it are in :class:`PublishedRulesTests`.
     """
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        status = main(argv)
+    with stubbed_rules_check():
+        with contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err):
+            status = main(argv)
     return status, out.getvalue(), err.getvalue()
 
 
@@ -219,11 +243,14 @@ class JsonOnlyOptionTests(unittest.TestCase):
 class StartAtTests(unittest.TestCase):
     """``--start-at`` anchors the periods at a supplied instant.
 
-    The value carries its own offset, so the periods come back expressed
-    in that offset rather than in the default ``+08:00``. The parsing is
-    covered here as well, because ``datetime.fromisoformat`` accepts a
-    timestamp with no offset at all and ``pricing_periods`` would then
-    reject it with a traceback instead of a usage error.
+    The value carries its own offset, which is how the instant is known,
+    but the output is always UTC: the peak hours are published in UTC, so
+    ``schedule`` evaluates them there and reports them there. A ``+08:00``
+    timestamp therefore names the instant rather than the output offset.
+    The parsing is covered here as well, because
+    ``datetime.fromisoformat`` accepts a timestamp with no offset at all
+    and ``pricing_periods`` would then reject it with a traceback instead
+    of a usage error.
     """
 
     def test_defaults_to_none(self):
@@ -234,8 +261,12 @@ class StartAtTests(unittest.TestCase):
         args = parse(["json", "--start-at", "2026-11-10T23:15:00+08:00"])[1]
         self.assertEqual(
             args.start_at,
-            datetime(2026, 11, 10, 23, 15, tzinfo=BEIJING),
+            datetime(2026, 11, 10, 15, 15, tzinfo=UTC),
         )
+
+    def test_converts_an_offset_timestamp_to_utc(self):
+        args = parse(["json", "--start-at", "2026-11-10T23:15:00+08:00"])[1]
+        self.assertEqual(args.start_at.utcoffset(), timedelta(0))
 
     def test_accepts_zulu_timestamp(self):
         args = parse(["json", "--start-at", "2026-11-10T15:15:00Z"])[1]
@@ -243,24 +274,27 @@ class StartAtTests(unittest.TestCase):
 
     def test_equals_form_is_accepted(self):
         args = parse(["json", "--start-at=2026-11-10T23:15:00+08:00"])[1]
-        self.assertEqual(args.start_at.hour, 23)
+        self.assertEqual(
+            args.start_at, datetime(2026, 11, 10, 15, 15, tzinfo=UTC)
+        )
 
     def test_starts_the_periods_at_the_given_instant(self):
+        # 23:15 +08:00 is 15:15 UTC, off-peak until the 01:00 window.
         doc = run_json(["json", "--start-at", "2026-11-10T23:15:00+08:00",
                         "--max-periods", "3"])[1]
         self.assertEqual(
             [p["startTime"] for p in doc["periods"]],
-            ["2026-11-10T23:15:00+08:00",
-             "2026-11-11T01:00:00+08:00",
-             "2026-11-11T04:00:00+08:00"],
+            ["2026-11-10T15:15:00+00:00",
+             "2026-11-11T01:00:00+00:00",
+             "2026-11-11T04:00:00+00:00"],
         )
 
-    def test_periods_are_expressed_in_the_given_offset(self):
+    def test_periods_are_always_expressed_in_utc(self):
         doc = run_json(["json", "--start-at", "2026-11-10T15:15:00Z",
                         "--max-periods", "2"])[1]
         self.assertEqual(
             [p["startTime"] for p in doc["periods"]],
-            ["2026-11-10T15:15:00+00:00", "2026-11-10T17:00:00+00:00"],
+            ["2026-11-10T15:15:00+00:00", "2026-11-11T01:00:00+00:00"],
         )
 
     def test_start_at_output_matches_schema(self):
@@ -270,7 +304,7 @@ class StartAtTests(unittest.TestCase):
     def test_without_start_at_the_first_period_is_now(self):
         first = run_json(["json", "--max-periods", "1"])[1]["periods"][0]
         start = datetime.fromisoformat(first["startTime"])
-        elapsed = (datetime.now(tz=BEIJING) - start).total_seconds()
+        elapsed = (datetime.now(tz=UTC) - start).total_seconds()
         self.assertLess(abs(elapsed), 60)
 
     def test_rejects_unparseable_timestamp(self):
@@ -383,11 +417,92 @@ class GuiCommandTests(unittest.TestCase):
         original = deepseek_pricing.run_gui
         deepseek_pricing.run_gui = lambda: calls.append(True) or 0
         try:
-            status = main(["gui"])
+            status = run(["gui"])[0]
         finally:
             deepseek_pricing.run_gui = original
         self.assertEqual(status, 0)
         self.assertEqual(calls, [True])
+
+
+class PublishedRulesTests(unittest.TestCase):
+    """The published-rules check gates both commands.
+
+    The schedule is only justified by one paragraph of the DeepSeek
+    documentation, so the command refuses to run when that paragraph is
+    gone. The check is a network call, which is why every other test
+    stubs it and these are the ones that exercise it.
+    """
+
+    def test_failure_stops_the_json_command(self):
+        def fail():
+            raise deepseek_pricing.pricing_doc.PricingDocError("changed")
+
+        out, err = io.StringIO(), io.StringIO()
+        with stubbed_rules_check(fail):
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(err):
+                status = main(["json"])
+        self.assertEqual(status, 1)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("deepseek-alert: changed", err.getvalue())
+
+    def test_failure_is_reported_on_stderr(self):
+        def fail():
+            raise deepseek_pricing.pricing_doc.PricingDocError("changed")
+
+        err = io.StringIO()
+        with stubbed_rules_check(fail):
+            status = deepseek_pricing.verify_published_rules(error_file=err)
+        self.assertEqual(status, 1)
+        self.assertIn("deepseek-alert: changed", err.getvalue())
+
+    def test_failure_does_not_start_the_gui(self):
+        calls = []
+
+        def fail():
+            raise deepseek_pricing.pricing_doc.PricingDocError("changed")
+
+        original = deepseek_pricing.run_gui
+        deepseek_pricing.run_gui = lambda: calls.append(True) or 0
+        try:
+            err = io.StringIO()
+            with stubbed_rules_check(fail):
+                with contextlib.redirect_stderr(err):
+                    status = main(["gui"])
+        finally:
+            deepseek_pricing.run_gui = original
+        self.assertEqual(status, 1)
+        self.assertEqual(calls, [])
+
+    def test_success_returns_zero(self):
+        self.assertEqual(deepseek_pricing.verify_published_rules(
+            error_file=io.StringIO()), 0)
+
+    def test_no_command_skips_the_check(self):
+        calls = []
+
+        def record():
+            calls.append(True)
+
+        out = io.StringIO()
+        with stubbed_rules_check(record):
+            with contextlib.redirect_stdout(out):
+                status = main([])
+        self.assertEqual(status, 0)
+        self.assertEqual(calls, [])
+
+    def test_help_skips_the_check(self):
+        calls = []
+
+        def record():
+            calls.append(True)
+
+        with stubbed_rules_check(record):
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    main(["--help"])
+        self.assertEqual(caught.exception.code, 0)
+        self.assertEqual(calls, [])
 
 
 class DefaultCommandTests(unittest.TestCase):
