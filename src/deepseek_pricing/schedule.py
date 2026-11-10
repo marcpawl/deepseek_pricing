@@ -7,7 +7,12 @@ Pricing rules, evaluated in Beijing time (UTC+8):
 * On other days, 01:00-04:00 and 06:00-10:00 are peak; the rest is
   non-peak.
 
-Periods are reported in UTC as ISO 8601 timestamps.
+Periods are reported as ISO 8601 timestamps in the timezone of ``now``.
+That is Beijing time (``+08:00``) by default, since :func:`pricing_periods`
+defaults ``now`` to the current Beijing time; pass an aware datetime in
+another timezone to get the periods expressed in that timezone instead.
+Each timestamp keeps a UTC offset, so the instants are unambiguous
+wherever they are compared.
 """
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -104,6 +109,10 @@ def pricing_periods(count=3, now=None):
     where the previous one ends, so the periods alternate between PEAK and
     NONPEAK. Each yielded item follows the ``PricingPeriod`` definition in
     ``deepseek_pricing.schema.json``.
+
+    ``now`` defaults to the current Beijing time, and the timestamps are
+    reported in its timezone, so the output carries a ``+08:00`` offset
+    unless ``now`` is passed with a different one.
 
     The arguments are validated immediately, so invalid input raises
     ``ValueError`` here rather than on the first ``next()`` call.
