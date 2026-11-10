@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PricingPeriods",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Always 1"
+    },
+    "periods": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PricingPeriod"
+      }
+    }
+  },
+  "required": [
+    "version",
+    "periods"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "Pricing": {
+      "type": "string",
+      "enum": [
+        "PEAK",
+        "NONPEAK"
+      ]
+    },
+    "PricingPeriod": {
+      "type": "object",
+      "properties": {
+        "startTime": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start time in UTC (ISO 8601)"
+        },
+        "endTime": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End time in UTC (ISO 8601)"
+        },
+        "pricing": {
+          "$ref": "#/definitions/Pricing"
+        }
+      },
+      "required": [
+        "startTime",
+        "endTime",
+        "pricing"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
