@@ -2,11 +2,24 @@
 """Developer helper commands for the deepseek_pricing project."""
 import argparse
 import os
+import re
 import subprocess
 import sys
+from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_TARGETS = ("src", "scripts", ".githooks")
+SKIPPED_DIRECTORIES = ("__pycache__", ".venv", ".git")
+
+# Matches a shebang that runs python, directly or through env.
+PYTHON_SHEBANG = re.compile(
+    rb"^#!"
+    rb"(?:"
+    rb"(?:\S*/)?python"          # /usr/bin/python3, python3.12, bin/python
+    rb"|"
+    rb"(?:\S*/)?env\s+(?:-\S+\s+)*python"  # /usr/bin/env [-S] python3
+    rb")"
+)
 
 
 def repo_path(*parts):
@@ -14,23 +27,37 @@ def repo_path(*parts):
     return os.path.join(REPO_ROOT, *parts)
 
 
+def is_python_file(path):
+    """True if the path is a python file by suffix or shebang."""
+    path = Path(path)
+    if path.suffix == ".py":
+        return True
+    try:
+        with path.open("rb") as stream:
+            first_line = stream.readline()
+    except (OSError, ValueError):
+        return False
+    return bool(PYTHON_SHEBANG.match(first_line))
+
+
 def collect_python_files(targets):
-    """Return sorted python file paths found under the given targets."""
+    """Return sorted python file Paths found under the given targets."""
     files = []
     for target in targets:
-        target_path = repo_path(target)
-        if os.path.isfile(target_path):
-            if target_path.endswith(".py"):
+        target_path = Path(repo_path(target))
+        if target_path.is_file():
+            if is_python_file(target_path):
                 files.append(target_path)
             continue
         for root, dirnames, filenames in os.walk(target_path):
             dirnames[:] = sorted(
-                d for d in dirnames
-                if d not in ("__pycache__", ".venv", ".git")
+                d for d in dirnames if d not in SKIPPED_DIRECTORIES
             )
             for filename in sorted(filenames):
-                if filename.endswith(".py"):
-                    files.append(os.path.join(root, filename))
+                candidate = Path(root) / filename
+                if is_python_file(candidate):
+                    files.append(candidate)
+    files.sort()
     return files
 
 
@@ -68,7 +95,10 @@ def cmd_pycodestyle(args):
     """Check PEP 8 compliance of the project's python files."""
     import pycodestyle
 
-    targets = select_targets(args.targets, use_git_index=args.staged)
+    targets = [
+        str(target)
+        for target in select_targets(args.targets, use_git_index=args.staged)
+    ]
     if not targets:
         print("pycodestyle: no python files to check")
         return 0
