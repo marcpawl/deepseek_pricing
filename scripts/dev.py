@@ -116,22 +116,22 @@ def cmd_pycodestyle(args):
     return 0
 
 
+TEST_DIRECTORIES = ("src", "scripts")
+
+
 def cmd_test(args):
     """Run the project's unit tests with unittest."""
-    command = [
-        sys.executable,
-        "-m",
-        "unittest",
-        "discover",
-        "-s",
-        repo_path("scripts"),
-        "-p",
-        "test_*.py",
-        "-t",
-        repo_path("scripts"),
-        "-v",
-    ]
-    return subprocess.call(command, cwd=REPO_ROOT)
+    status = 0
+    for directory in TEST_DIRECTORIES:
+        top_level = repo_path(directory)
+        status = status or subprocess.call(
+            [
+                sys.executable, "-m", "unittest", "discover", "-v",
+                "-s", top_level, "-t", top_level,
+            ],
+            cwd=REPO_ROOT,
+        )
+    return status
 
 
 def build_parser():
@@ -176,7 +176,10 @@ def build_parser():
     tests = subparsers.add_parser(
         "test",
         help="Run the unit tests.",
-        description="Run the unit tests in scripts/ with unittest.",
+        description=(
+            "Run the unit tests in "
+            f"{', '.join(TEST_DIRECTORIES)}/ with unittest."
+        ),
     )
     tests.set_defaults(func=cmd_test)
 

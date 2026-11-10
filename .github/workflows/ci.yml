@@ -20,8 +20,103 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Verify the published pricing rules
+        # The unit tests stub this check out so they stay offline and
+        # deterministic, which leaves the real call unexercised. It runs
+        # here, unstubbed, so CI fails in two cases that matter:
+        # the documentation cannot be fetched at all, and the paragraph
+        # the schedule implements is gone or has been reworded.
+        run: |
+          uv run python - <<'PY'
+          import sys
+
+          from deepseek_pricing import pricing_doc
+
+          try:
+              pricing_doc.verify_published_rules()
+          except pricing_doc.PricingDocError as error:
+              print("pricing rules check failed:", file=sys.stderr)
+              print(error, file=sys.stderr)
+              sys.exit(1)
+          print(f"pricing rules confirmed at {pricing_doc.PRICING_DOC_URL}")
+          PY
+
       - name: Check PEP 8 compliance
         run: uv run python scripts/dev.py pycodestyle
 
       - name: Run unit tests
         run: uv run python scripts/dev.py test
+
+  cli-without-tkinter:
+    # tkinter is a separate package on Linux (python3-tk on Debian and
+    # Ubuntu) and is not guaranteed to be installed, so `--help` and the
+    # `json` command must work without it. tkinter is blocked explicitly
+    # here rather than relying on the runner image lacking it, so this job
+    # proves the same thing on every runner.
+    #
+    # The `json` run below performs the published-rules check for real, so
+    # this job also fails when the documentation is unreachable or the
+    # paragraph has changed. That is intended: the command now refuses to
+    # run in those cases, and CI should see the same failure a user would.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run the CLI with tkinter blocked
+        run: |
+          uv run python - <<'PY'
+          import io
+          import contextlib
+          import sys
+
+
+          class Blocker:
+              """Make `import tkinter` fail, as on a host without it."""
+
+              def find_spec(self, name, path=None, target=None):
+                  if name == "tkinter" or name.startswith("tkinter."):
+                      raise ModuleNotFoundError("No module named 'tkinter'")
+                  return None
+
+
+          sys.meta_path.insert(0, Blocker())
+
+          from deepseek_pricing import main
+
+          failed = False
+          for argv in (["--help"], ["json", "--max-periods", "2"]):
+              out, err = io.StringIO(), io.StringIO()
+              try:
+                  with contextlib.redirect_stdout(out), \
+                          contextlib.redirect_stderr(err):
+                      status = main(argv)
+              except SystemExit as exit_error:
+                  # argparse's help action exits instead of returning.
+                  status = exit_error.code
+              print(f"{argv[0]}: exit {status}, {len(out.getvalue())} bytes")
+              failed = failed or status != 0 or not out.getvalue()
+
+          if failed:
+              print("CLI failed with tkinter blocked", file=sys.stderr)
+              sys.exit(1)
+
+          # The json output must still be a parseable document.
+          import json
+          from deepseek_pricing import main as run
+
+          buffer = io.StringIO()
+          with contextlib.redirect_stdout(buffer):
+              run(["json", "--max-periods", "2"])
+          document = json.loads(buffer.getvalue())
+          print(f"json: {len(document['periods'])} periods")
+          if len(document["periods"]) != 2:
+              sys.exit("json period count is wrong")
+          PY
