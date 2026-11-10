@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 SRC_DIR = Path(__file__).resolve().parents[1]
@@ -16,6 +17,7 @@ import jsonschema  # noqa: E402
 
 import deepseek_pricing  # noqa: E402
 from deepseek_pricing import main  # noqa: E402
+from deepseek_pricing.schedule import BEIJING  # noqa: E402
 
 SCHEMA_PATH = SRC_DIR / "deepseek_pricing.schema.json"
 
@@ -148,6 +150,7 @@ class ParserTests(unittest.TestCase):
         status, _, out, _ = parse(["gui", "--help"])
         self.assertEqual(status, 0)
         self.assertNotIn("--max", out)
+        self.assertNotIn("--start-at", out)
 
 
 class RemovedFlagTests(unittest.TestCase):
@@ -211,6 +214,101 @@ class JsonOnlyOptionTests(unittest.TestCase):
     def test_limits_are_accepted_by_json(self):
         self.assertEqual(parse(["json", "--max-periods", "2"])[1]
                          .max_periods, 2)
+
+
+class StartAtTests(unittest.TestCase):
+    """``--start-at`` anchors the periods at a supplied instant.
+
+    The value carries its own offset, so the periods come back expressed
+    in that offset rather than in the default ``+08:00``. The parsing is
+    covered here as well, because ``datetime.fromisoformat`` accepts a
+    timestamp with no offset at all and ``pricing_periods`` would then
+    reject it with a traceback instead of a usage error.
+    """
+
+    def test_defaults_to_none(self):
+        # None is what makes pricing_periods use the current time.
+        self.assertIsNone(parse(["json"])[1].start_at)
+
+    def test_accepts_offset_timestamp(self):
+        args = parse(["json", "--start-at", "2026-11-10T23:15:00+08:00"])[1]
+        self.assertEqual(
+            args.start_at,
+            datetime(2026, 11, 10, 23, 15, tzinfo=BEIJING),
+        )
+
+    def test_accepts_zulu_timestamp(self):
+        args = parse(["json", "--start-at", "2026-11-10T15:15:00Z"])[1]
+        self.assertEqual(args.start_at.utcoffset(), timedelta(0))
+
+    def test_equals_form_is_accepted(self):
+        args = parse(["json", "--start-at=2026-11-10T23:15:00+08:00"])[1]
+        self.assertEqual(args.start_at.hour, 23)
+
+    def test_starts_the_periods_at_the_given_instant(self):
+        doc = run_json(["json", "--start-at", "2026-11-10T23:15:00+08:00",
+                        "--max-periods", "3"])[1]
+        self.assertEqual(
+            [p["startTime"] for p in doc["periods"]],
+            ["2026-11-10T23:15:00+08:00",
+             "2026-11-11T01:00:00+08:00",
+             "2026-11-11T04:00:00+08:00"],
+        )
+
+    def test_periods_are_expressed_in_the_given_offset(self):
+        doc = run_json(["json", "--start-at", "2026-11-10T15:15:00Z",
+                        "--max-periods", "2"])[1]
+        self.assertEqual(
+            [p["startTime"] for p in doc["periods"]],
+            ["2026-11-10T15:15:00+00:00", "2026-11-10T17:00:00+00:00"],
+        )
+
+    def test_start_at_output_matches_schema(self):
+        doc = run_json(["json", "--start-at", "2026-11-10T23:15:00+08:00"])[1]
+        jsonschema.validate(instance=doc, schema=schema())
+
+    def test_without_start_at_the_first_period_is_now(self):
+        first = run_json(["json", "--max-periods", "1"])[1]["periods"][0]
+        start = datetime.fromisoformat(first["startTime"])
+        elapsed = (datetime.now(tz=BEIJING) - start).total_seconds()
+        self.assertLess(abs(elapsed), 60)
+
+    def test_rejects_unparseable_timestamp(self):
+        status, args, _, err = parse(["json", "--start-at", "garbage"])
+        self.assertEqual(status, 2)
+        self.assertIsNone(args)
+        self.assertIn("invalid ISO 8601 timestamp", err)
+
+    def test_rejects_timestamp_without_offset(self):
+        # fromisoformat parses this into a naive datetime, which
+        # pricing_periods refuses; catch it at the parser instead.
+        for value in ("2026-11-10T23:15", "2026-11-10"):
+            with self.subTest(value=value):
+                status, args, _, err = parse(["json", "--start-at", value])
+                self.assertEqual(status, 2)
+                self.assertIsNone(args)
+                self.assertIn("needs a UTC offset", err)
+
+    def test_rejects_missing_value(self):
+        status, args, _, err = parse(["json", "--start-at"])
+        self.assertEqual(status, 2)
+        self.assertIsNone(args)
+        self.assertIn("expected one argument", err)
+
+    def test_bad_timestamp_exits_two_without_a_traceback(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit) as caught:
+                main(["json", "--start-at", "garbage"])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertNotIn("Traceback", err.getvalue())
+
+    def test_gui_does_not_accept_start_at(self):
+        status, args, _, err = parse(["gui", "--start-at",
+                                      "2026-11-10T23:15:00+08:00"])
+        self.assertEqual(status, 2)
+        self.assertIsNone(args)
+        self.assertIn("unrecognized arguments", err)
 
 
 class UsageErrorTests(unittest.TestCase):

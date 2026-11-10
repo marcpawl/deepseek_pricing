@@ -6,6 +6,7 @@ Tkinter front end lives in ``gui``.
 """
 import argparse
 import sys
+from datetime import datetime
 
 from deepseek_pricing import schedule
 
@@ -37,6 +38,32 @@ def non_negative_int(value):
     return number
 
 
+def iso8601_with_offset(value):
+    """argparse type for an ISO 8601 timestamp that has a UTC offset.
+
+    The offset is required rather than optional. ``datetime.fromisoformat``
+    happily parses ``2026-11-10T23:15`` and ``2026-11-10`` into naive
+    datetimes, and those are the values that ``pricing_periods`` rejects
+    with ``now must be timezone aware``. Accepting them here would only
+    move that failure from a one line usage error to a traceback, so a
+    missing offset is treated as the malformed input it is.
+
+    ``Z`` is accepted: it is the ISO 8601 designator for UTC, and
+    ``fromisoformat`` turns it into a UTC ``tzinfo``.
+    """
+    try:
+        timestamp = datetime.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid ISO 8601 timestamp: {value!r}"
+        ) from None
+    if timestamp.tzinfo is None:
+        raise argparse.ArgumentTypeError(
+            f"timestamp needs a UTC offset, like +08:00 or Z: {value!r}"
+        )
+    return timestamp
+
+
 def build_parser():
     """Build the command line parser for the ``deepseek-alert`` command."""
     parser = argparse.ArgumentParser(
@@ -56,6 +83,16 @@ def build_parser():
         "json",
         help="print the next pricing periods as JSON",
         description="Print the next pricing periods as JSON.",
+    )
+    json_parser.add_argument(
+        "--start-at",
+        type=iso8601_with_offset,
+        default=None,
+        metavar="TIMESTAMP",
+        help=(
+            "start at this ISO 8601 timestamp with a UTC offset instead of "
+            "now (default: now)"
+        ),
     )
     json_parser.add_argument(
         "--max-periods",
@@ -107,7 +144,7 @@ def run_json(args, file=None):
     if max_periods is None:
         max_periods = DEFAULT_MAX_PERIODS
     print_pricing_json(
-        schedule.pricing_periods(LOOKAHEAD_PERIODS),
+        schedule.pricing_periods(LOOKAHEAD_PERIODS, args.start_at),
         max_periods=max_periods,
         max_peak_periods=args.max_peak_periods,
         max_nonpeak_periods=args.max_nonpeak_periods,

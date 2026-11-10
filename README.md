@@ -58,10 +58,27 @@ The first period starts at the current time, and each later period
 starts where the previous one ended, so the periods are contiguous and
 alternate between `PEAK` and `NONPEAK`.
 
+Use `--start-at` to start somewhere else instead of now:
+
+```
+uv run src/deepseek_pricing/__init__.py json \
+    --start-at 2026-11-10T23:15:00+08:00 --max-periods 3
+```
+
+The value is an ISO 8601 timestamp and must include a UTC offset, either
+numeric (`+08:00`, `-05:00`, `+0000`) or `Z` for UTC. A timestamp with no
+offset, such as `2026-11-10T23:15`, is rejected: without an offset the
+instant is ambiguous.
+
+The periods are reported in the offset that was given, so a `Z` timestamp
+yields `+00:00` timestamps. This also makes the sample output above
+reproducible - that is exactly how it was generated.
+
 There are options to change the number of periods that is returned
 in the JSON. See `json --help`.
 
 ```
+--start-at TIMESTAMP    start at an ISO 8601 time with a UTC offset (default: now)
 --max-periods N         emit at most N periods (default 5)
 --max-peak-periods N    stop after N peak periods (default --max-periods)
 --max-nonpeak-periods N stop after N non-peak periods (default --max-periods)
