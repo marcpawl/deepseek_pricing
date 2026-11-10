@@ -3,7 +3,7 @@ Indicate the schedule (start time, end time) for when Deepseek is
 in peak pricing
 
 Pricing is evaluated in UTC, as published on 
-(Deepseek pricing)[https://api-docs.deepseek.com/quick_start/pricing/]
+[Deepseek pricing](https://api-docs.deepseek.com/quick_start/pricing/)
 : weekends and Chinese public
 holidays are always off-peak; on other days 01:00-04:00 and 06:00-10:00
 UTC are peak.
