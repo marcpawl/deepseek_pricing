@@ -4,3 +4,103 @@
 The pricing rules and the period iterator live in ``schedule``; the
 Tkinter front end lives in ``gui``.
 """
+import argparse
+import sys
+
+from deepseek_pricing import schedule
+
+# How far the JSON output may walk the iterator. The period limits decide
+# what is actually emitted; this only bounds the search so a large
+# ``--max-periods`` still terminates.
+LOOKAHEAD_PERIODS = 30
+
+
+def build_parser():
+    """Build the command line parser for the ``deepseek-alert`` command."""
+    parser = argparse.ArgumentParser(
+        prog="deepseek-alert",
+        description=(
+            "Show when DeepSeek is in peak pricing. Weekends and Chinese "
+            "public holidays are always off-peak."
+        ),
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--gui",
+        action="store_true",
+        help="run the full screen monitor window",
+    )
+    group.add_argument(
+        "--json",
+        action="store_true",
+        help="print the next pricing periods as JSON",
+    )
+    parser.add_argument(
+        "--max-periods",
+        type=int,
+        default=None,
+        metavar="N",
+        help="emit at most N periods (default: 5, JSON only)",
+    )
+    parser.add_argument(
+        "--max-peak-periods",
+        type=int,
+        default=None,
+        metavar="N",
+        help="stop after N peak periods (default: --max-periods)",
+    )
+    parser.add_argument(
+        "--max-nonpeak-periods",
+        type=int,
+        default=None,
+        metavar="N",
+        help="stop after N non-peak periods (default: --max-periods)",
+    )
+    return parser
+
+
+def run_gui():
+    """Start the monitor window.
+
+    ``gui`` is imported here rather than at module scope so that
+    ``--json`` and ``--help`` do not require tkinter.
+    """
+    from deepseek_pricing import gui
+
+    gui.main()
+    return 0
+
+
+def run_json(args, file=None):
+    """Print the pricing periods document described by the JSON schema."""
+    from pricing_json import DEFAULT_MAX_PERIODS, print_pricing_json
+
+    max_periods = args.max_periods
+    if max_periods is None:
+        max_periods = DEFAULT_MAX_PERIODS
+    print_pricing_json(
+        schedule.pricing_periods(LOOKAHEAD_PERIODS),
+        max_periods=max_periods,
+        max_peak_periods=args.max_peak_periods,
+        max_nonpeak_periods=args.max_nonpeak_periods,
+        file=file,
+    )
+    return 0
+
+
+def main(argv=None):
+    """Run the command line interface and return an exit status."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.gui:
+        return run_gui()
+    if args.json:
+        return run_json(args)
+
+    parser.print_help()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
