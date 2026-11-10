@@ -47,7 +47,7 @@ class DeepSeekMonitorApp:
             self.root,
             text="Acknowledge",
             font=("Helvetica", 12, "bold"),
-            command=self.acknowledge_and_minimize,
+            command=self.acknowledge_and_restore,
             bg="#ffffff",
             fg="#000000",
             relief="raised",
@@ -58,6 +58,11 @@ class DeepSeekMonitorApp:
         self.ack_button_visible = False
 
         self.current_state = None
+        self.acknowledged = False
+        # Window state captured before the alert forced it fullscreen, so
+        # acknowledge can put it back exactly how the user had it.
+        self.pre_alert_state = "normal"
+        self.pre_alert_fullscreen = False
 
         self.force_to_foreground()
 
@@ -73,9 +78,25 @@ class DeepSeekMonitorApp:
         self.root.attributes("-topmost", True)
         self.root.after(1000, lambda: self.root.attributes("-topmost", False))
 
-    def acknowledge_and_minimize(self):
-        self.root.attributes("-fullscreen", False)
-        self.root.iconify()
+    def capture_window_state(self):
+        """Remember how the window looked before an alert resized it."""
+        self.pre_alert_state = self.root.state()
+        self.pre_alert_fullscreen = bool(
+            self.root.attributes("-fullscreen")
+        )
+
+    def acknowledge_and_restore(self):
+        """Dismiss the alert and return to the pre-alert window state."""
+        self.acknowledged = True
+        self.root.attributes("-fullscreen", self.pre_alert_fullscreen)
+        if self.pre_alert_fullscreen:
+            self.root.deiconify()
+        elif self.pre_alert_state == "zoomed":
+            self.root.state("zoomed")
+        elif self.pre_alert_state == "iconic":
+            self.root.iconify()
+        else:
+            self.root.state("normal")
 
     def trigger_chime(self):
         try:
@@ -221,8 +242,18 @@ class DeepSeekMonitorApp:
     def update_ui(self, color, display_text):
         self.label.config(text=display_text, bg=color)
 
-        if color in ("yellow", "red"):
-            self.root.attributes("-fullscreen", True)
+        alert = color in ("yellow", "red")
+        if alert and self.current_state not in ("yellow", "red"):
+            # Entering an alert: remember the window state to restore to,
+            # and clear any acknowledgement left over from a previous one.
+            self.capture_window_state()
+            self.acknowledged = False
+        elif not alert:
+            self.acknowledged = False
+
+        if alert:
+            if not self.acknowledged:
+                self.root.attributes("-fullscreen", True)
             if not self.ack_button_visible:
                 self.ack_button.pack(side="bottom", fill="x", padx=20, pady=20)
                 self.ack_button_visible = True
@@ -234,8 +265,9 @@ class DeepSeekMonitorApp:
 
         if color != self.current_state:
             self.current_state = color
-            self.force_to_foreground()
-            if color in ("yellow", "red"):
+            if alert and not self.acknowledged:
+                self.force_to_foreground()
+            if alert:
                 self.trigger_chime()
 
     def timing_loop(self):
