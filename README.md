@@ -109,6 +109,10 @@ Runs a GUI application that will become a full screen
 display to notify the user when a peak pricing period
 is in effect, or about to start.
 
+The schedule can be taller than the window, so the text area scrolls: a
+vertical scroll bar appears on its right whenever the schedule does not
+fit, and the mouse wheel or touchpad scrolls it.
+
 The GUI is only imported by the `gui` command, so `json` and `--help`
 work without tkinter or a display.
 

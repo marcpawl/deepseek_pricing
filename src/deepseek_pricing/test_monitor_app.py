@@ -129,6 +129,126 @@ class PricingPeriodHelperTests(unittest.TestCase):
         self.assertIn("Beijing |", text)
 
 
+class FakeScrollbar:
+    """Records grid/grid_remove calls instead of touching a real window."""
+
+    def __init__(self, mapped=False):
+        self.mapped = mapped
+        self.set_calls = []
+        self.grid_calls = 0
+        self.grid_remove_calls = 0
+
+    def set(self, first, last):
+        self.set_calls.append((first, last))
+
+    def winfo_ismapped(self):
+        return self.mapped
+
+    def grid(self):
+        self.mapped = True
+        self.grid_calls += 1
+
+    def grid_remove(self):
+        self.mapped = False
+        self.grid_remove_calls += 1
+
+
+class FakeCanvas:
+    """Records the scroll moves requested by the wheel handler."""
+
+    def __init__(self, content_height=100, view_height=200):
+        self.scrolls = []
+        self.moves = []
+        self.content_height = content_height
+        self.view_height = view_height
+
+    def bbox(self, _tag):
+        return (0, 0, 100, self.content_height)
+
+    def winfo_height(self):
+        return self.view_height
+
+    def yview_scroll(self, steps, units):
+        self.scrolls.append((steps, units))
+
+    def yview_moveto(self, fraction):
+        self.moves.append(fraction)
+
+
+class FakeEvent:
+    def __init__(self, delta=0, num=None):
+        self.delta = delta
+        self.num = num
+
+
+class ScrollbarTests(unittest.TestCase):
+
+    def make_scroll_app(self, mapped=False, content_height=300,
+                        view_height=200):
+        app = make_app()
+        app.scrollbar = FakeScrollbar(mapped=mapped)
+        app.canvas = FakeCanvas(
+            content_height=content_height, view_height=view_height
+        )
+        return app
+
+    def test_scrollbar_appears_when_text_overflows(self):
+        app = self.make_scroll_app(mapped=False)
+        app.sync_scrollbar("0.0", "0.5")
+        self.assertTrue(app.scrollbar.mapped)
+        self.assertEqual(app.scrollbar.grid_calls, 1)
+        self.assertEqual(app.scrollbar.set_calls, [("0.0", "0.5")])
+
+    def test_scrollbar_hidden_when_text_fits(self):
+        app = self.make_scroll_app(mapped=True, content_height=100)
+        app.sync_scrollbar("0.0", "1.0")
+        self.assertFalse(app.scrollbar.mapped)
+        self.assertEqual(app.scrollbar.grid_remove_calls, 1)
+        self.assertEqual(app.canvas.moves, [0.0])
+
+    def test_scrollbar_stays_hidden_when_text_fits(self):
+        app = self.make_scroll_app(mapped=False, content_height=100)
+        app.sync_scrollbar("0.0", "1.0")
+        self.assertFalse(app.scrollbar.mapped)
+        self.assertEqual(app.scrollbar.grid_calls, 0)
+        self.assertEqual(app.scrollbar.grid_remove_calls, 0)
+
+    def test_fitting_text_hides_scrollbar_even_with_stale_fractions(self):
+        # Scrolling down then shrinking the text leaves the yview
+        # fractions below (0.0, 1.0); the canvas height decides.
+        app = self.make_scroll_app(mapped=True, content_height=100)
+        app.sync_scrollbar("0.1", "0.3")
+        self.assertFalse(app.scrollbar.mapped)
+
+    def test_exactly_fitting_text_hides_scrollbar(self):
+        app = self.make_scroll_app(mapped=True, content_height=200,
+                                   view_height=200)
+        app.sync_scrollbar("0.0", "1.0")
+        self.assertFalse(app.scrollbar.mapped)
+
+    def test_wheel_does_nothing_without_scrollbar(self):
+        app = self.make_scroll_app(mapped=False)
+        app.scroll_wheel(FakeEvent(delta=-120))
+        self.assertEqual(app.canvas.scrolls, [])
+
+    def test_wheel_direction_from_delta(self):
+        app = self.make_scroll_app(mapped=True)
+        app.scroll_wheel(FakeEvent(delta=120))
+        app.scroll_wheel(FakeEvent(delta=-120))
+        self.assertEqual(app.canvas.scrolls, [(-1, "units"), (1, "units")])
+
+    def test_wheel_direction_from_x11_button(self):
+        app = self.make_scroll_app(mapped=True)
+        app.scroll_wheel(FakeEvent(num=4))
+        app.scroll_wheel(FakeEvent(num=5))
+        self.assertEqual(app.canvas.scrolls, [(-1, "units"), (1, "units")])
+
+    def test_wheel_ignores_events_without_direction(self):
+        app = self.make_scroll_app(mapped=True)
+        app.scroll_wheel(FakeEvent())
+        self.assertEqual(app.canvas.scrolls, [])
+
+
 class MissingTkinterTests(unittest.TestCase):
     """The module must stay importable when tkinter is not installed.
 
