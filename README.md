@@ -28,6 +28,35 @@ Returns the next few pricing periods.
 describes how the next few pricing periods are represented
 in JSON.
 
+For example:
+
+```json
+{
+  "version": 1,
+  "periods": [
+    {
+      "startTime": "2026-11-10T23:15:00+08:00",
+      "endTime": "2026-11-11T01:00:00+08:00",
+      "pricing": "NONPEAK"
+    },
+    {
+      "startTime": "2026-11-11T01:00:00+08:00",
+      "endTime": "2026-11-11T04:00:00+08:00",
+      "pricing": "PEAK"
+    },
+    {
+      "startTime": "2026-11-11T04:00:00+08:00",
+      "endTime": "2026-11-11T06:00:00+08:00",
+      "pricing": "NONPEAK"
+    }
+  ]
+}
+```
+
+The first period starts at the current time, and each later period
+starts where the previous one ended, so the periods are contiguous and
+alternate between `PEAK` and `NONPEAK`.
+
 There are options to change the number of periods that is returned
 in the JSON. See help.
 
