@@ -117,15 +117,3 @@ def pricing_periods(count=3, now=None):
         raise ValueError("now must be timezone aware")
 
     return iter_pricing_periods(count, now)
-
-
-def pricing_schedule(count=3, now=None):
-    """Return the periods document described by the JSON schema.
-
-    This collects :func:`pricing_periods` into the ``version``/``periods``
-    object that ``deepseek_pricing.schema.json`` describes.
-    """
-    return {
-        "version": SCHEMA_VERSION,
-        "periods": list(pricing_periods(count, now)),
-    }

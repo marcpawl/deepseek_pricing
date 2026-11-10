@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for deepseek_pricing.schedule."""
 import collections.abc
-import json
 import sys
 import unittest
 from datetime import datetime
@@ -12,27 +11,14 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-import jsonschema  # noqa: E402
-
 from deepseek_pricing import schedule  # noqa: E402
 
-SCHEMA_PATH = SRC_DIR / "deepseek_pricing.schema.json"
 UTC = ZoneInfo("UTC")
 
 
 def utc(*args):
     """Build an aware UTC datetime."""
     return datetime(*args, tzinfo=UTC)
-
-
-class LoadSchemaMixin:
-
-    @classmethod
-    def setUpClass(cls):
-        cls.schema = json.loads(SCHEMA_PATH.read_text())
-
-    def assert_matches_schema(self, data):
-        jsonschema.validate(instance=data, schema=self.schema)
 
 
 class PricingRulesTests(unittest.TestCase):
@@ -169,37 +155,6 @@ class PricingPeriodsIteratorTests(unittest.TestCase):
         for period in schedule.pricing_periods(2, utc(2026, 11, 10, 2, 0)):
             self.assertTrue(period["startTime"].endswith("+00:00"))
             self.assertTrue(period["endTime"].endswith("+00:00"))
-
-
-class PricingScheduleTests(LoadSchemaMixin, unittest.TestCase):
-
-    def test_matches_schema_from_peak(self):
-        self.assert_matches_schema(
-            schedule.pricing_schedule(4, utc(2026, 11, 10, 1, 30))
-        )
-
-    def test_matches_schema_from_weekend(self):
-        self.assert_matches_schema(
-            schedule.pricing_schedule(5, utc(2026, 11, 7, 5, 0))
-        )
-
-    def test_matches_schema_from_holiday(self):
-        self.assert_matches_schema(
-            schedule.pricing_schedule(5, utc(2026, 10, 1, 3, 0))
-        )
-
-    def test_document_shape(self):
-        data = schedule.pricing_schedule(3, utc(2026, 11, 10, 2, 0))
-        self.assertEqual(data["version"], 1)
-        self.assertEqual(len(data["periods"]), 3)
-        self.assertEqual(
-            data["periods"],
-            list(schedule.pricing_periods(3, utc(2026, 11, 10, 2, 0))),
-        )
-
-    def test_zero_periods(self):
-        data = schedule.pricing_schedule(0, utc(2026, 11, 10, 2, 0))
-        self.assertEqual(data, {"version": 1, "periods": []})
 
 
 if __name__ == "__main__":

@@ -74,12 +74,6 @@ class DeepSeekMonitorApp:
         except Exception:
             pass
 
-    def is_off_peak_day(self, dt):
-        """True if the datetime is a Beijing weekend or holiday."""
-        beijing_date = dt.astimezone(schedule.BEIJING).date()
-        calendar = schedule.holidays.China(years=beijing_date.year)
-        return schedule.is_non_peak_day(beijing_date, calendar)
-
     def get_next_non_peak_windows(self, utc_now, count=3):
         """Return the next N distinct non-peak windows."""
         periods = schedule.pricing_periods(LOOKAHEAD_PERIODS, utc_now)

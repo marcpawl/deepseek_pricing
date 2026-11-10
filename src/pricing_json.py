@@ -97,13 +97,3 @@ def print_pricing_json(periods, max_periods=DEFAULT_MAX_PERIODS,
         max_nonpeak_periods=max_nonpeak_periods,
     )
     print(text, file=file)
-
-
-def main(argv=None):
-    """Print the default schedule to standard output, for manual checks."""
-    print_pricing_json(schedule.pricing_periods(30))
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
