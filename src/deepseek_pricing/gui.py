@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Tkinter front end that displays DeepSeek peak and non-peak windows."""
+"""Tkinter front end that displays DeepSeek peak and non-peak windows.
+
+``tkinter`` is imported inside :meth:`DeepSeekMonitorApp.__init__` rather
+than at module scope, so this module can be imported on a machine where
+tkinter is not installed. The helpers that only do schedule arithmetic
+are then usable, and testable, without a GUI toolkit.
+"""
 import itertools
 import threading
 import time
 from datetime import datetime
-from tkinter import Tk, Label, Button
 from zoneinfo import ZoneInfo
 
 from deepseek_pricing import schedule
@@ -19,6 +24,10 @@ WARNING_MINUTES = 15
 class DeepSeekMonitorApp:
 
     def __init__(self):
+        # Imported here so that merely importing this module does not
+        # require tkinter, which some distributions ship separately.
+        from tkinter import Tk, Label, Button
+
         self.root = Tk()
         self.root.title("DeepSeek Primetime Monitor")
         self.root.geometry("800x550")

@@ -186,6 +186,16 @@ class DefaultCommandTests(unittest.TestCase):
         self.assertIn("--json", out)
         self.assertIn("--gui", out)
 
+    def test_help_option_raises_system_exit(self):
+        # main(["--help"]) does not return: argparse's help action exits
+        # with status 0. Callers that loop over argv must expect this.
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            with self.assertRaises(SystemExit) as caught:
+                main(["--help"])
+        self.assertEqual(caught.exception.code, 0)
+        self.assertIn("usage: deepseek-alert", out.getvalue())
+
 
 class TkinterIndependenceTests(unittest.TestCase):
     """Importing the package must not pull in tkinter.

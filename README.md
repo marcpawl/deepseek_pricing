@@ -51,3 +51,11 @@ is in effect, or about to start.
 
 The GUI is only imported when `--gui` is given, so `--json` and `--help`
 work without tkinter or a display.
+
+`--gui` needs tkinter, which some Linux distributions ship as a separate
+package:
+
+```
+sudo apt install python3-tk      # Debian and Ubuntu
+sudo dnf install python3-tkinter # Fedora
+```

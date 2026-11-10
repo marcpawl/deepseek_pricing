@@ -4,6 +4,7 @@
 The Tk window itself is not created: the helpers under test never touch
 it, so the instance is built with ``object.__new__``.
 """
+import subprocess
 import sys
 import unittest
 from datetime import datetime
@@ -125,6 +126,51 @@ class PricingPeriodHelperTests(unittest.TestCase):
         self.assertIn("WINDOW #1", text)
         self.assertIn("Local   |", text)
         self.assertIn("Beijing |", text)
+
+
+class MissingTkinterTests(unittest.TestCase):
+    """The module must stay importable when tkinter is not installed.
+
+    Ubuntu ships tkinter as a separate ``python3-tk`` package, and CI
+    installs neither, so importing this module must not require it.
+    The probe runs in a subprocess because ``sys.modules`` cannot be
+    un-imported once another test module has loaded tkinter.
+    """
+
+    PROBE = """
+import sys
+
+
+class Blocker:
+    def find_spec(self, name, path=None, target=None):
+        if name == "tkinter" or name.startswith("tkinter."):
+            raise ModuleNotFoundError("No module named 'tkinter'")
+        return None
+
+
+sys.meta_path.insert(0, Blocker())
+sys.path.insert(0, {src!r})
+
+from deepseek_pricing import gui
+app = object.__new__(gui.DeepSeekMonitorApp)
+from datetime import datetime
+from zoneinfo import ZoneInfo
+now = datetime(2026, 11, 10, 2, 0, tzinfo=ZoneInfo("UTC"))
+print(app.compute_color(now))
+print(len(app.get_next_non_peak_windows(now)))
+"""
+
+    def test_import_and_helpers_work_without_tkinter(self):
+        result = subprocess.run(
+            [sys.executable, "-c", self.PROBE.format(src=str(SRC_DIR))],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["green", "3"])
+
+    def test_tkinter_is_not_imported_at_module_scope(self):
+        self.assertNotIn("tkinter", gui.__dict__)
 
 
 if __name__ == "__main__":
