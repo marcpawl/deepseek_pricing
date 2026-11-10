@@ -23,7 +23,15 @@ help text is printed.
 uv run src/deepseek_pricing/__init__.py json
 ```
 
-Returns the next few pricing periods.
+Returns the next few pricing periods. Use `--start-at` to start from a
+given instant instead of the current time, and `--max-periods` to choose
+how many periods come back. With a fixed timestamp the output is
+reproducible, so the sample below is exactly what this prints:
+
+```
+uv run src/deepseek_pricing/__init__.py json \
+    --start-at 2026-11-10T23:15:00+08:00 --max-periods 3
+```
 
 [deepseek_pricing.schema.json](src/deepseek_pricing.schema.json)
 describes how the next few pricing periods are represented
@@ -54,25 +62,17 @@ For example:
 }
 ```
 
-The first period starts at the current time, and each later period
-starts where the previous one ended, so the periods are contiguous and
-alternate between `PEAK` and `NONPEAK`.
+The first period starts at the current time, or at `--start-at` if it is
+given, and each later period starts where the previous one ended, so the
+periods are contiguous and alternate between `PEAK` and `NONPEAK`.
 
-Use `--start-at` to start somewhere else instead of now:
-
-```
-uv run src/deepseek_pricing/__init__.py json \
-    --start-at 2026-11-10T23:15:00+08:00 --max-periods 3
-```
-
-The value is an ISO 8601 timestamp and must include a UTC offset, either
-numeric (`+08:00`, `-05:00`, `+0000`) or `Z` for UTC. A timestamp with no
-offset, such as `2026-11-10T23:15`, is rejected: without an offset the
-instant is ambiguous.
+The `--start-at` value is an ISO 8601 timestamp and must include a UTC
+offset, either numeric (`+08:00`, `-05:00`, `+0000`) or `Z` for UTC. A
+timestamp with no offset, such as `2026-11-10T23:15`, is rejected:
+without an offset the instant is ambiguous.
 
 The periods are reported in the offset that was given, so a `Z` timestamp
-yields `+00:00` timestamps. This also makes the sample output above
-reproducible - that is exactly how it was generated.
+yields `+00:00` timestamps.
 
 There are options to change the number of periods that is returned
 in the JSON. See `json --help`.
