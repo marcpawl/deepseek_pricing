@@ -1,0 +1,19 @@
+[project]
+name = "deepseek-pricing"
+version = "0.1.0"
+description = "Indicate the next scheduled Deepseek pricing periods."
+readme = "README.md"
+authors = [
+    { name = "Marc Pawlowsky", email = "marcpawl@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "holidays>=0.108",
+]
+
+[project.scripts]
+deepseek-alert = "deepseek_pricing:main"
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
