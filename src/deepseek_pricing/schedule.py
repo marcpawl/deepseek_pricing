@@ -88,12 +88,25 @@ def pricing_period(start, end):
     }
 
 
+def iter_pricing_periods(count, now):
+    """Yield ``count`` pricing periods starting at ``now``."""
+    start = now
+    for _ in range(count):
+        end = find_boundary(start)
+        yield pricing_period(start, end)
+        start = end
+
+
 def pricing_periods(count=3, now=None):
-    """Return the current pricing period followed by the next ones.
+    """Return an iterator of the current and following pricing periods.
 
     The current period starts at ``now`` and each subsequent period starts
     where the previous one ends, so the periods alternate between PEAK and
-    NONPEAK. The result matches ``deepseek_pricing.schema.json``.
+    NONPEAK. Each yielded item follows the ``PricingPeriod`` definition in
+    ``deepseek_pricing.schema.json``.
+
+    The arguments are validated immediately, so invalid input raises
+    ``ValueError`` here rather than on the first ``next()`` call.
     """
     if count < 0:
         raise ValueError("count must not be negative")
@@ -103,11 +116,16 @@ def pricing_periods(count=3, now=None):
     elif now.tzinfo is None:
         raise ValueError("now must be timezone aware")
 
-    periods = []
-    start = now
-    for _ in range(count):
-        end = find_boundary(start)
-        periods.append(pricing_period(start, end))
-        start = end
+    return iter_pricing_periods(count, now)
 
-    return {"version": SCHEMA_VERSION, "periods": periods}
+
+def pricing_schedule(count=3, now=None):
+    """Return the periods document described by the JSON schema.
+
+    This collects :func:`pricing_periods` into the ``version``/``periods``
+    object that ``deepseek_pricing.schema.json`` describes.
+    """
+    return {
+        "version": SCHEMA_VERSION,
+        "periods": list(pricing_periods(count, now)),
+    }

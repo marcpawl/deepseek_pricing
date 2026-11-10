@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for deepseek_pricing.schedule."""
+import collections.abc
 import json
 import sys
 import unittest
@@ -111,12 +112,17 @@ class BoundaryTests(unittest.TestCase):
                 )
 
 
-class PricingPeriodTests(LoadSchemaMixin, unittest.TestCase):
+class PricingPeriodsIteratorTests(unittest.TestCase):
+
+    def test_returns_an_iterator(self):
+        periods = schedule.pricing_periods(2, utc(2026, 11, 10, 2, 0))
+        self.assertIs(iter(periods), periods)
+        self.assertIsInstance(periods, collections.abc.Iterator)
+        self.assertNotIsInstance(periods, (list, tuple, dict))
 
     def test_current_peak_period_is_included(self):
         # Beijing 01:30 is peak, ending when the 04:00 window closes.
-        data = schedule.pricing_periods(3, utc(2026, 11, 9, 17, 30))
-        periods = data["periods"]
+        periods = list(schedule.pricing_periods(3, utc(2026, 11, 9, 17, 30)))
         self.assertEqual(periods[0]["startTime"],
                          utc(2026, 11, 9, 17, 30).isoformat())
         self.assertEqual(periods[0]["endTime"],
@@ -124,57 +130,76 @@ class PricingPeriodTests(LoadSchemaMixin, unittest.TestCase):
         self.assertEqual(periods[0]["pricing"], "PEAK")
 
     def test_current_non_peak_period_is_included(self):
-        data = schedule.pricing_periods(1, utc(2026, 11, 10, 2, 0))
-        self.assertEqual(data["periods"][0]["pricing"], "NONPEAK")
+        period = next(schedule.pricing_periods(1, utc(2026, 11, 10, 2, 0)))
+        self.assertEqual(period["pricing"], "NONPEAK")
 
     def test_periods_are_contiguous_and_alternate(self):
-        data = schedule.pricing_periods(6, utc(2026, 11, 10, 2, 0))
-        periods = data["periods"]
+        periods = list(schedule.pricing_periods(6, utc(2026, 11, 10, 2, 0)))
         self.assertEqual(len(periods), 6)
         for previous, current in zip(periods, periods[1:]):
             self.assertEqual(previous["endTime"], current["startTime"])
             self.assertNotEqual(previous["pricing"], current["pricing"])
 
     def test_zero_periods(self):
-        data = schedule.pricing_periods(0, utc(2026, 11, 10, 2, 0))
-        self.assertEqual(data, {"version": 1, "periods": []})
+        self.assertEqual(
+            list(schedule.pricing_periods(0, utc(2026, 11, 10, 2, 0))), []
+        )
 
     def test_default_count_is_three(self):
-        data = schedule.pricing_periods(now=utc(2026, 11, 10, 2, 0))
-        self.assertEqual(len(data["periods"]), 3)
+        periods = schedule.pricing_periods(now=utc(2026, 11, 10, 2, 0))
+        self.assertEqual(len(list(periods)), 3)
 
     def test_default_now_is_used(self):
-        data = schedule.pricing_periods(1)
-        self.assertEqual(len(data["periods"]), 1)
+        self.assertEqual(len(list(schedule.pricing_periods(1))), 1)
 
-    def test_naive_datetime_is_rejected(self):
-        with self.assertRaises(ValueError):
-            schedule.pricing_periods(1, datetime(2026, 11, 10, 2, 0))
-
-    def test_negative_count_is_rejected(self):
+    def test_negative_count_is_rejected_eagerly(self):
         with self.assertRaises(ValueError):
             schedule.pricing_periods(-1, utc(2026, 11, 10, 2, 0))
 
+    def test_naive_datetime_is_rejected_eagerly(self):
+        with self.assertRaises(ValueError):
+            schedule.pricing_periods(1, datetime(2026, 11, 10, 2, 0))
+
+    def test_is_lazy_but_repeatable_for_new_calls(self):
+        first = schedule.pricing_periods(2, utc(2026, 11, 10, 2, 0))
+        second = schedule.pricing_periods(2, utc(2026, 11, 10, 2, 0))
+        self.assertEqual(next(first), next(second))
+
+    def test_times_are_iso_utc(self):
+        for period in schedule.pricing_periods(2, utc(2026, 11, 10, 2, 0)):
+            self.assertTrue(period["startTime"].endswith("+00:00"))
+            self.assertTrue(period["endTime"].endswith("+00:00"))
+
+
+class PricingScheduleTests(LoadSchemaMixin, unittest.TestCase):
+
     def test_matches_schema_from_peak(self):
         self.assert_matches_schema(
-            schedule.pricing_periods(4, utc(2026, 11, 10, 1, 30))
+            schedule.pricing_schedule(4, utc(2026, 11, 10, 1, 30))
         )
 
     def test_matches_schema_from_weekend(self):
         self.assert_matches_schema(
-            schedule.pricing_periods(5, utc(2026, 11, 7, 5, 0))
+            schedule.pricing_schedule(5, utc(2026, 11, 7, 5, 0))
         )
 
     def test_matches_schema_from_holiday(self):
         self.assert_matches_schema(
-            schedule.pricing_periods(5, utc(2026, 10, 1, 3, 0))
+            schedule.pricing_schedule(5, utc(2026, 10, 1, 3, 0))
         )
 
-    def test_times_are_iso_utc(self):
-        data = schedule.pricing_periods(2, utc(2026, 11, 10, 2, 0))
-        for period in data["periods"]:
-            self.assertTrue(period["startTime"].endswith("+00:00"))
-            self.assertTrue(period["endTime"].endswith("+00:00"))
+    def test_document_shape(self):
+        data = schedule.pricing_schedule(3, utc(2026, 11, 10, 2, 0))
+        self.assertEqual(data["version"], 1)
+        self.assertEqual(len(data["periods"]), 3)
+        self.assertEqual(
+            data["periods"],
+            list(schedule.pricing_periods(3, utc(2026, 11, 10, 2, 0))),
+        )
+
+    def test_zero_periods(self):
+        data = schedule.pricing_schedule(0, utc(2026, 11, 10, 2, 0))
+        self.assertEqual(data, {"version": 1, "periods": []})
 
 
 if __name__ == "__main__":

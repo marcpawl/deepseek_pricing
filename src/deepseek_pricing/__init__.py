@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
+import itertools
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from tkinter import Tk, Label, Button
 from zoneinfo import ZoneInfo
-import holidays
+
+from deepseek_pricing import schedule
+
+# How many pricing periods to inspect when looking for non-peak windows.
+# Each day contributes at most a few periods, so this covers many days.
+LOOKAHEAD_PERIODS = 30
+# Minutes before a peak window starts that the UI switches to yellow.
+WARNING_MINUTES = 15
 
 
 class DeepSeekMonitorApp:
@@ -39,7 +47,6 @@ class DeepSeekMonitorApp:
         )
         self.ack_button_visible = False
 
-        self.peak_windows = [(1, 4), (6, 10)]
         self.current_state = None
 
         self.force_to_foreground()
@@ -67,63 +74,37 @@ class DeepSeekMonitorApp:
             pass
 
     def is_off_peak_day(self, dt):
-        """True if the UTC datetime is a Beijing weekend or holiday."""
-        beijing_dt = dt.astimezone(ZoneInfo("Asia/Shanghai"))
-        beijing_date = beijing_dt.date()
-        cn_holidays = holidays.China(years=beijing_date.year)
-        return beijing_dt.weekday() in (5, 6) or beijing_date in cn_holidays
+        """True if the datetime is a Beijing weekend or holiday."""
+        beijing_date = dt.astimezone(schedule.BEIJING).date()
+        calendar = schedule.holidays.China(years=beijing_date.year)
+        return schedule.is_non_peak_day(beijing_date, calendar)
 
     def get_next_non_peak_windows(self, utc_now, count=3):
-        """Find the next N distinct non-peak windows by scanning ahead."""
-        windows = []
-        current_time = utc_now.replace(second=0, microsecond=0)
+        """Return the next N distinct non-peak windows."""
+        periods = schedule.pricing_periods(LOOKAHEAD_PERIODS, utc_now)
+        windows = (
+            period for period in periods
+            if period["pricing"] == schedule.NONPEAK
+        )
+        return [
+            (
+                datetime.fromisoformat(period["startTime"]),
+                datetime.fromisoformat(period["endTime"]),
+            )
+            for period in itertools.islice(windows, count)
+        ]
 
-        # Look ahead up to 5 days to safely step over weekends/holidays
-        max_look_ahead = current_time + timedelta(days=5)
-
-        while current_time < max_look_ahead and len(windows) < count:
-            # Check if current minute is off-peak
-            is_off_peak = False
-            if self.is_off_peak_day(current_time):
-                is_off_peak = True
-            else:
-                # Weekday rule: check if outside peak windows
-                hour = current_time.hour
-                in_peak = any(
-                    start <= hour < end for start, end in self.peak_windows
-                )
-                is_off_peak = not in_peak
-
-            if is_off_peak:
-                start_bound = current_time
-                # Trace forward to find where this off-peak block finishes
-                end_bound = start_bound
-                while end_bound < max_look_ahead:
-                    next_minute = end_bound + timedelta(minutes=1)
-                    # Evaluate if next minute changes back to peak
-                    next_is_off_peak = False
-                    if self.is_off_peak_day(next_minute):
-                        next_is_off_peak = True
-                    else:
-                        next_hour = next_minute.hour
-                        next_in_peak = any(
-                            start <= next_hour < end
-                            for start, end in self.peak_windows
-                        )
-                        next_is_off_peak = not next_in_peak
-
-                    if not next_is_off_peak:
-                        end_bound = next_minute
-                        break
-                    end_bound = next_minute
-
-                # Append found window block and fast-forward loop index past it
-                windows.append((start_bound, end_bound))
-                current_time = end_bound
-            else:
-                current_time += timedelta(minutes=1)
-
-        return windows
+    def get_pricing_periods(self, utc_now, count=3):
+        """Return the next N pricing periods with parsed datetimes."""
+        periods = schedule.pricing_periods(count, utc_now)
+        return [
+            {
+                "start": datetime.fromisoformat(period["startTime"]),
+                "end": datetime.fromisoformat(period["endTime"]),
+                "pricing": period["pricing"],
+            }
+            for period in itertools.islice(periods, count)
+        ]
 
     def format_countdown(self, delta):
         """Converts a timedelta into an hh:mm countdown string layout."""
@@ -134,45 +115,42 @@ class DeepSeekMonitorApp:
         minutes, _ = divmod(remainder, 60)
         return f"{hours}h:{minutes:02d}m"
 
-    def evaluate_status(self):
-        local_now = datetime.now().astimezone()
-        utc_now = local_now.astimezone(ZoneInfo("UTC"))
-        beijing_now = local_now.astimezone(ZoneInfo("Asia/Shanghai"))
-
-        time_display = (
+    def build_time_display(self, local_now, utc_now, beijing_now):
+        """Format the clock lines shown above the schedule."""
+        return (
             f"Local Time:   {local_now.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
             f"UTC Time:     {utc_now.strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
             f"Beijing Time: {beijing_now.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
             f"{'-'*76}\n"
         )
 
-        # 1. Determine current pricing state color logic
-        if self.is_off_peak_day(utc_now):
-            color = "green"
-        else:
-            in_peak = any(
-                start <= utc_now.hour < end
-                for start, end in self.peak_windows
-            )
-            if in_peak:
-                color = "red"
-            else:
-                # Find next peak start today for the yellow transition
-                next_peak_start = None
-                for start_hour, _ in self.peak_windows:
-                    candidate = utc_now.replace(
-                        hour=start_hour, minute=0, second=0, microsecond=0
-                    )
-                    if candidate > utc_now:
-                        next_peak_start = candidate
-                        break
+    def compute_color(self, utc_now):
+        """Map the current pricing state to a UI color.
 
-                if next_peak_start and (
-                    next_peak_start - utc_now
-                ).total_seconds() / 60.0 <= 15:
-                    color = "yellow"
-                else:
-                    color = "green"
+        Peak is red, non-peak that starts within WARNING_MINUTES minutes is
+        yellow, and everything else is green.
+        """
+        now_period, next_period = itertools.islice(
+            self.get_pricing_periods(utc_now, count=2), 2
+        )
+        if now_period["pricing"] == schedule.PEAK:
+            return "red"
+        minutes_until_peak = (
+            next_period["start"] - utc_now
+        ).total_seconds() / 60.0
+        if minutes_until_peak <= WARNING_MINUTES:
+            return "yellow"
+        return "green"
+
+    def evaluate_status(self):
+        local_now = datetime.now().astimezone()
+        utc_now = local_now.astimezone(ZoneInfo("UTC"))
+        beijing_now = utc_now.astimezone(schedule.BEIJING)
+
+        time_display = self.build_time_display(
+            local_now, utc_now, beijing_now
+        )
+        color = self.compute_color(utc_now)
 
         status_headers = {
             "red": "CRITICAL: DeepSeek Peak Pricing Window Active!",
