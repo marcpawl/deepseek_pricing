@@ -26,28 +26,56 @@ class DeepSeekMonitorApp:
     def __init__(self):
         # Imported here so that merely importing this module does not
         # require tkinter, which some distributions ship separately.
-        from tkinter import Tk, Label, Button
+        from tkinter import Tk, Label, Button, Canvas, Frame, Scrollbar
 
         self.root = Tk()
         self.root.title("DeepSeek Primetime Monitor")
         self.root.geometry("800x550")
 
+        # The schedule can be taller than the window, so the text lives on
+        # a canvas that scrolls. The scrollbar only appears while the text
+        # actually overflows the visible area.
+        self.scroll_frame = Frame(self.root)
+        self.scroll_frame.pack(expand=True, fill="both")
+
+        self.canvas = Canvas(
+            self.scroll_frame, highlightthickness=0, borderwidth=0
+        )
+        self.scrollbar = Scrollbar(
+            self.scroll_frame,
+            orient="vertical",
+            command=self.canvas.yview,
+        )
+        self.canvas.configure(yscrollcommand=self.sync_scrollbar)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+        self.scrollbar.grid_remove()
+        self.scroll_frame.rowconfigure(0, weight=1)
+        self.scroll_frame.columnconfigure(0, weight=1)
+
         # Use Courier to keep the tabular data perfectly aligned
         self.label = Label(
-            self.root,
+            self.canvas,
             text="Initializing...",
             font=("Courier", 11, "bold"),
             justify="left",
             padx=20,
             pady=20,
         )
-        self.label.pack(expand=True, fill="both")
+        self.label_window = self.canvas.create_window(
+            (0, 0), window=self.label, anchor="nw"
+        )
+        self.label.bind("<Configure>", self.update_scroll_region)
+        self.canvas.bind("<Configure>", self.resize_label)
+        self.canvas.bind_all("<MouseWheel>", self.scroll_wheel)
+        self.canvas.bind_all("<Button-4>", self.scroll_wheel)
+        self.canvas.bind_all("<Button-5>", self.scroll_wheel)
 
         self.ack_button = Button(
             self.root,
             text="Acknowledge",
             font=("Helvetica", 12, "bold"),
-            command=self.acknowledge_and_minimize,
+            command=self.acknowledge_and_restore,
             bg="#ffffff",
             fg="#000000",
             relief="raised",
@@ -58,6 +86,11 @@ class DeepSeekMonitorApp:
         self.ack_button_visible = False
 
         self.current_state = None
+        self.acknowledged = False
+        # Window state captured before the alert forced it fullscreen, so
+        # acknowledge can put it back exactly how the user had it.
+        self.pre_alert_state = "normal"
+        self.pre_alert_fullscreen = False
 
         self.force_to_foreground()
 
@@ -73,9 +106,67 @@ class DeepSeekMonitorApp:
         self.root.attributes("-topmost", True)
         self.root.after(1000, lambda: self.root.attributes("-topmost", False))
 
-    def acknowledge_and_minimize(self):
-        self.root.attributes("-fullscreen", False)
-        self.root.iconify()
+    def update_scroll_region(self, _event=None):
+        """Grow the scrollable area to match the size of the text block."""
+        region = self.canvas.bbox("all")
+        if region is not None:
+            self.canvas.configure(scrollregion=region)
+
+    def resize_label(self, event):
+        """Stretch the text block to the canvas width so its color fills."""
+        self.canvas.itemconfigure(self.label_window, width=event.width)
+
+    def sync_scrollbar(self, first, last):
+        """Show the scrollbar only while the text overflows the canvas."""
+        self.scrollbar.set(first, last)
+        # Compare heights rather than the yview fractions: when the text
+        # shrinks while scrolled down, the fractions stay away from
+        # (0.0, 1.0) for one update even though nothing overflows.
+        region = self.canvas.bbox("all")
+        needed = (
+            region is not None
+            and (region[3] - region[1]) > self.canvas.winfo_height()
+        )
+        visible = bool(self.scrollbar.winfo_ismapped())
+        if needed and not visible:
+            self.scrollbar.grid()
+        elif not needed and visible:
+            self.scrollbar.grid_remove()
+            self.canvas.yview_moveto(0.0)
+
+    def scroll_wheel(self, event):
+        """Scroll the schedule with the mouse wheel or touchpad."""
+        if not self.scrollbar.winfo_ismapped():
+            return
+        if getattr(event, "num", None) == 4:
+            steps = -1
+        elif getattr(event, "num", None) == 5:
+            steps = 1
+        elif getattr(event, "delta", 0):
+            steps = -1 if event.delta > 0 else 1
+        else:
+            return
+        self.canvas.yview_scroll(steps, "units")
+
+    def capture_window_state(self):
+        """Remember how the window looked before an alert resized it."""
+        self.pre_alert_state = self.root.state()
+        self.pre_alert_fullscreen = bool(
+            self.root.attributes("-fullscreen")
+        )
+
+    def acknowledge_and_restore(self):
+        """Dismiss the alert and return to the pre-alert window state."""
+        self.acknowledged = True
+        self.root.attributes("-fullscreen", self.pre_alert_fullscreen)
+        if self.pre_alert_fullscreen:
+            self.root.deiconify()
+        elif self.pre_alert_state == "zoomed":
+            self.root.state("zoomed")
+        elif self.pre_alert_state == "iconic":
+            self.root.iconify()
+        else:
+            self.root.state("normal")
 
     def trigger_chime(self):
         try:
@@ -220,9 +311,22 @@ class DeepSeekMonitorApp:
 
     def update_ui(self, color, display_text):
         self.label.config(text=display_text, bg=color)
+        # The canvas shows through below the text when the window is
+        # taller than the schedule, so it has to carry the same color.
+        self.canvas.config(bg=color)
 
-        if color in ("yellow", "red"):
-            self.root.attributes("-fullscreen", True)
+        alert = color in ("yellow", "red")
+        if alert and self.current_state not in ("yellow", "red"):
+            # Entering an alert: remember the window state to restore to,
+            # and clear any acknowledgement left over from a previous one.
+            self.capture_window_state()
+            self.acknowledged = False
+        elif not alert:
+            self.acknowledged = False
+
+        if alert:
+            if not self.acknowledged:
+                self.root.attributes("-fullscreen", True)
             if not self.ack_button_visible:
                 self.ack_button.pack(side="bottom", fill="x", padx=20, pady=20)
                 self.ack_button_visible = True
@@ -234,8 +338,9 @@ class DeepSeekMonitorApp:
 
         if color != self.current_state:
             self.current_state = color
-            self.force_to_foreground()
-            if color in ("yellow", "red"):
+            if alert and not self.acknowledged:
+                self.force_to_foreground()
+            if alert:
                 self.trigger_chime()
 
     def timing_loop(self):
