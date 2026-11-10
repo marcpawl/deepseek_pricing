@@ -3,6 +3,11 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Editor swap and backup files
+*.swp
+*.swo
+*~
+
 # C extensions
 *.so
 
