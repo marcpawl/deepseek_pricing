@@ -38,7 +38,7 @@ def run(argv):
 
 
 def run_json(argv):
-    """Run the CLI with ``--json`` and return the parsed document."""
+    """Run the ``json`` command and return the parsed document."""
     status, out, _ = run(argv)
     return status, json.loads(out)
 
@@ -62,33 +62,39 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(deepseek_pricing.build_parser().prog,
                          "deepseek-alert")
 
-    def test_gui_defaults_to_false(self):
-        self.assertFalse(parse([])[1].gui)
+    def test_no_command_by_default(self):
+        # A missing command is what makes main() print the help text.
+        self.assertIsNone(parse([])[1].command)
 
-    def test_json_defaults_to_false(self):
-        self.assertFalse(parse([])[1].json)
+    def test_accepts_json_command(self):
+        self.assertEqual(parse(["json"])[1].command, "json")
 
-    def test_accepts_gui(self):
-        self.assertTrue(parse(["--gui"])[1].gui)
+    def test_accepts_gui_command(self):
+        self.assertEqual(parse(["gui"])[1].command, "gui")
 
-    def test_accepts_json(self):
-        self.assertTrue(parse(["--json"])[1].json)
-
-    def test_gui_and_json_are_mutually_exclusive(self):
-        status, args, _, err = parse(["--gui", "--json"])
+    def test_unknown_command_is_rejected(self):
+        status, args, _, err = parse(["nope"])
         self.assertEqual(status, 2)
         self.assertIsNone(args)
-        self.assertIn("not allowed with argument", err)
+        self.assertIn("invalid choice", err)
+
+    def test_two_commands_are_rejected(self):
+        # The commands are subcommands, so only the first is taken as the
+        # command and "json" is left over as a stray argument.
+        status, args, _, err = parse(["gui", "json"])
+        self.assertEqual(status, 2)
+        self.assertIsNone(args)
+        self.assertIn("unrecognized arguments: json", err)
 
     def test_json_limits_default_to_none(self):
-        args = parse(["--json"])[1]
+        args = parse(["json"])[1]
         self.assertIsNone(args.max_periods)
         self.assertIsNone(args.max_peak_periods)
         self.assertIsNone(args.max_nonpeak_periods)
 
     def test_accepts_json_limits(self):
         args = parse([
-            "--json", "--max-periods", "2",
+            "json", "--max-periods", "2",
             "--max-peak-periods", "1",
             "--max-nonpeak-periods", "1",
         ])[1]
@@ -97,7 +103,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(args.max_nonpeak_periods, 1)
 
     def test_rejects_non_integer_limit(self):
-        status, _, _, err = parse(["--json", "--max-periods", "x"])
+        status, _, _, err = parse(["json", "--max-periods", "x"])
         self.assertEqual(status, 2)
         self.assertIn("invalid int value", err)
 
@@ -107,19 +113,19 @@ class ParserTests(unittest.TestCase):
         for option in ("--max-periods", "--max-peak-periods",
                        "--max-nonpeak-periods"):
             with self.subTest(option=option):
-                status, args, _, err = parse(["--json", option, "-1"])
+                status, args, _, err = parse(["json", option, "-1"])
                 self.assertEqual(status, 2)
                 self.assertIsNone(args)
                 self.assertIn("must not be negative", err)
 
     def test_accepts_zero_limit(self):
-        self.assertEqual(parse(["--json", "--max-periods", "0"])[1]
+        self.assertEqual(parse(["json", "--max-periods", "0"])[1]
                          .max_periods, 0)
 
     def test_accepts_negative_looking_value_after_option(self):
         # argparse must consume "-1" as the option's value, not mistake it
         # for an option of its own, so the error names the right option.
-        _, _, _, err = parse(["--json", "--max-periods", "-1"])
+        _, _, _, err = parse(["json", "--max-periods", "-1"])
         self.assertIn("argument --max-periods", err)
 
     def test_help_exits_zero(self):
@@ -127,16 +133,84 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("usage: deepseek-alert", out)
 
-    def test_unknown_option_is_rejected(self):
-        status, _, _, err = parse(["--nope"])
+    def test_help_lists_the_commands(self):
+        out = parse(["--help"])[2]
+        self.assertIn("{json,gui}", out)
+
+    def test_json_help_lists_the_limits(self):
+        status, _, out, _ = parse(["json", "--help"])
+        self.assertEqual(status, 0)
+        for option in ("--max-periods", "--max-peak-periods",
+                       "--max-nonpeak-periods"):
+            self.assertIn(option, out)
+
+    def test_gui_help_omits_the_limits(self):
+        status, _, out, _ = parse(["gui", "--help"])
+        self.assertEqual(status, 0)
+        self.assertNotIn("--max", out)
+
+
+class RemovedFlagTests(unittest.TestCase):
+    """The old ``--json`` and ``--gui`` flags are gone, not aliased.
+
+    They became subcommands, so the flags must fail loudly. Keeping them
+    as aliases would leave two spellings of every command to document and
+    test, and argparse cannot put the limit options on a flag anyway.
+    """
+
+    def test_json_flag_is_rejected(self):
+        status, args, _, err = parse(["--json"])
         self.assertEqual(status, 2)
+        self.assertIsNone(args)
+        self.assertIn("unrecognized arguments: --json", err)
+
+    def test_gui_flag_is_rejected(self):
+        status, args, _, err = parse(["--gui"])
+        self.assertEqual(status, 2)
+        self.assertIsNone(args)
+        self.assertIn("unrecognized arguments: --gui", err)
+
+    def test_error_points_at_the_replacement(self):
+        # The usage line names the commands, so the correction is visible
+        # without reading the release notes.
+        _, _, _, err = parse(["--json"])
+        self.assertIn("{json,gui}", err)
+
+
+class JsonOnlyOptionTests(unittest.TestCase):
+    """The ``--max-*`` limits belong to the ``json`` command alone.
+
+    They used to sit on the top-level parser, where ``--gui --max-periods
+    2`` silently parsed and ignored the value. As options of the ``json``
+    subparser they cannot be given to any other command.
+    """
+
+    def test_limits_are_rejected_without_a_command(self):
+        # argparse reads the "2" as the command name, so the complaint is
+        # about an invalid choice rather than the stray option. Either way
+        # it is a usage error: exit 2 and nothing parsed.
+        status, args, _, err = parse(["--max-periods", "2"])
+        self.assertEqual(status, 2)
+        self.assertIsNone(args)
+        self.assertIn("error:", err)
+
+    def test_limits_are_rejected_by_gui(self):
+        status, args, _, err = parse(["gui", "--max-periods", "2"])
+        self.assertEqual(status, 2)
+        self.assertIsNone(args)
         self.assertIn("unrecognized arguments", err)
 
-    def test_help_documents_every_option(self):
-        out = parse(["--help"])[2]
-        for option in ("--gui", "--json", "--max-periods",
-                       "--max-peak-periods", "--max-nonpeak-periods"):
-            self.assertIn(option, out)
+    def test_every_limit_is_rejected_by_gui(self):
+        for option in ("--max-periods", "--max-peak-periods",
+                       "--max-nonpeak-periods"):
+            with self.subTest(option=option):
+                status, args, _, _ = parse(["gui", option, "1"])
+                self.assertEqual(status, 2)
+                self.assertIsNone(args)
+
+    def test_limits_are_accepted_by_json(self):
+        self.assertEqual(parse(["json", "--max-periods", "2"])[1]
+                         .max_periods, 2)
 
 
 class UsageErrorTests(unittest.TestCase):
@@ -153,7 +227,7 @@ class UsageErrorTests(unittest.TestCase):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             with self.assertRaises(SystemExit) as caught:
-                main(["--json", "--max-periods", "-1"])
+                main(["json", "--max-periods", "-1"])
         self.assertEqual(caught.exception.code, 2)
         self.assertIn("must not be negative", err.getvalue())
         self.assertNotIn("Traceback", err.getvalue())
@@ -162,46 +236,46 @@ class UsageErrorTests(unittest.TestCase):
 class JsonCommandTests(unittest.TestCase):
 
     def test_json_exits_zero(self):
-        self.assertEqual(run(["--json"])[0], 0)
+        self.assertEqual(run(["json"])[0], 0)
 
     def test_json_writes_only_to_stdout(self):
-        status, out, err = run(["--json", "--max-periods", "1"])
+        status, out, err = run(["json", "--max-periods", "1"])
         self.assertEqual(status, 0)
         self.assertNotEqual(out, "")
         self.assertEqual(err, "")
 
     def test_json_defaults_to_five_periods(self):
-        self.assertEqual(len(run_json(["--json"])[1]["periods"]), 5)
+        self.assertEqual(len(run_json(["json"])[1]["periods"]), 5)
 
     def test_json_matches_schema(self):
-        doc = run_json(["--json"])[1]
+        doc = run_json(["json"])[1]
         jsonschema.validate(instance=doc, schema=schema())
 
     def test_json_respects_max_periods(self):
-        self.assertEqual(len(run_json(["--json", "--max-periods", "2"])[1]
+        self.assertEqual(len(run_json(["json", "--max-periods", "2"])[1]
                              ["periods"]), 2)
 
     def test_json_respects_max_peak_periods(self):
-        doc = run_json(["--json", "--max-peak-periods", "1",
+        doc = run_json(["json", "--max-peak-periods", "1",
                         "--max-periods", "10"])[1]
         self.assertEqual(
             [p["pricing"] for p in doc["periods"]].count("PEAK"), 1
         )
 
     def test_json_respects_max_nonpeak_periods(self):
-        doc = run_json(["--json", "--max-nonpeak-periods", "1",
+        doc = run_json(["json", "--max-nonpeak-periods", "1",
                         "--max-periods", "10"])[1]
         self.assertEqual(
             [p["pricing"] for p in doc["periods"]].count("NONPEAK"), 1
         )
 
     def test_json_zero_periods(self):
-        self.assertEqual(run_json(["--json", "--max-periods", "0"])[1],
+        self.assertEqual(run_json(["json", "--max-periods", "0"])[1],
                          {"version": 1, "periods": []})
 
     def test_json_does_not_start_the_gui(self):
         # A GUI would block in mainloop, so returning is the assertion.
-        self.assertEqual(run_json(["--json", "--max-periods", "1"])[0], 0)
+        self.assertEqual(run_json(["json", "--max-periods", "1"])[0], 0)
 
 
 class GuiCommandTests(unittest.TestCase):
@@ -211,7 +285,7 @@ class GuiCommandTests(unittest.TestCase):
         original = deepseek_pricing.run_gui
         deepseek_pricing.run_gui = lambda: calls.append(True) or 0
         try:
-            status = main(["--gui"])
+            status = main(["gui"])
         finally:
             deepseek_pricing.run_gui = original
         self.assertEqual(status, 0)
@@ -224,8 +298,8 @@ class DefaultCommandTests(unittest.TestCase):
         status, out, _ = run([])
         self.assertEqual(status, 0)
         self.assertIn("usage: deepseek-alert", out)
-        self.assertIn("--json", out)
-        self.assertIn("--gui", out)
+        self.assertIn("json", out)
+        self.assertIn("gui", out)
 
     def test_help_option_raises_system_exit(self):
         # main(["--help"]) does not return: argparse's help action exits
@@ -260,7 +334,7 @@ class TkinterIndependenceTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "no")
 
     def test_package_import_does_not_import_tkinter(self):
-        # --json and --help must work on machines without a display.
+        # The json command and --help must work without a display.
         self.assert_not_imported("tkinter")
 
     def test_package_import_does_not_import_gui(self):

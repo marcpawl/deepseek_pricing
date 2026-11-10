@@ -5,4 +5,4 @@ cd $(dirname $0)
 # start up
 sleep 10
 
-uv run src/deepseek_pricing/__init__.py --gui
+uv run src/deepseek_pricing/__init__.py gui

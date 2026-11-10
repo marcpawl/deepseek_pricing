@@ -14,12 +14,13 @@ from the source tree, which is what the examples below do.
 uv run src/deepseek_pricing/__init__.py --help
 ```
 
-With no option at all the help text is printed.
+There are two commands, `json` and `gui`. With no command at all the
+help text is printed.
 
 ## JSON
 
 ```
-uv run src/deepseek_pricing/__init__.py --json
+uv run src/deepseek_pricing/__init__.py json
 ```
 
 Returns the next few pricing periods.
@@ -58,7 +59,7 @@ starts where the previous one ended, so the periods are contiguous and
 alternate between `PEAK` and `NONPEAK`.
 
 There are options to change the number of periods that is returned
-in the JSON. See help.
+in the JSON. See `json --help`.
 
 ```
 --max-periods N         emit at most N periods (default 5)
@@ -66,22 +67,23 @@ in the JSON. See help.
 --max-nonpeak-periods N stop after N non-peak periods (default --max-periods)
 ```
 
+These options belong to the `json` command. They are not accepted by
+`gui`, and giving one without a command is a usage error.
+
 ## GUI
 
 ```
-uv run src/deepseek_pricing/__init__.py --gui
+uv run src/deepseek_pricing/__init__.py gui
 ```
 
 Runs a GUI application that will become a full screen 
 display to notify the user when a peak pricing period
 is in effect, or about to start.
 
-`--gui` and `--json` are mutually exclusive.
-
-The GUI is only imported when `--gui` is given, so `--json` and `--help`
+The GUI is only imported by the `gui` command, so `json` and `--help`
 work without tkinter or a display.
 
-`--gui` needs tkinter, which some Linux distributions ship as a separate
+`gui` needs tkinter, which some Linux distributions ship as a separate
 package:
 
 ```

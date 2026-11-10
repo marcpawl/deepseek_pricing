@@ -46,37 +46,43 @@ def build_parser():
             "public holidays are always off-peak."
         ),
     )
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--gui",
-        action="store_true",
-        help="run the full screen monitor window",
+    subparsers = parser.add_subparsers(
+        dest="command",
+        title="commands",
+        metavar="{json,gui}",
     )
-    group.add_argument(
-        "--json",
-        action="store_true",
+
+    json_parser = subparsers.add_parser(
+        "json",
         help="print the next pricing periods as JSON",
+        description="Print the next pricing periods as JSON.",
     )
-    parser.add_argument(
+    json_parser.add_argument(
         "--max-periods",
         type=non_negative_int,
         default=None,
         metavar="N",
-        help="emit at most N periods (default: 5, JSON only)",
+        help="emit at most N periods (default: 5)",
     )
-    parser.add_argument(
+    json_parser.add_argument(
         "--max-peak-periods",
         type=non_negative_int,
         default=None,
         metavar="N",
         help="stop after N peak periods (default: --max-periods)",
     )
-    parser.add_argument(
+    json_parser.add_argument(
         "--max-nonpeak-periods",
         type=non_negative_int,
         default=None,
         metavar="N",
         help="stop after N non-peak periods (default: --max-periods)",
+    )
+
+    subparsers.add_parser(
+        "gui",
+        help="run the full screen monitor window",
+        description="Run the full screen monitor window.",
     )
     return parser
 
@@ -84,8 +90,8 @@ def build_parser():
 def run_gui():
     """Start the monitor window.
 
-    ``gui`` is imported here rather than at module scope so that
-    ``--json`` and ``--help`` do not require tkinter.
+    ``gui`` is imported here rather than at module scope so that the
+    ``json`` command and ``--help`` do not require tkinter.
     """
     from deepseek_pricing import gui
 
@@ -115,9 +121,9 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.gui:
+    if args.command == "gui":
         return run_gui()
-    if args.json:
+    if args.command == "json":
         return run_json(args)
 
     parser.print_help()
