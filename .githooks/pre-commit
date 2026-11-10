@@ -1,2 +1,49 @@
 #!/usr/bin/env python3
-#
+"""Git pre-commit hook: reject commits that fail checks."""
+import os
+import subprocess
+import sys
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEV_SCRIPT = os.path.join(REPO_ROOT, "scripts", "dev.py")
+
+
+def python_executable():
+    """Prefer the project virtualenv so dev dependencies are available."""
+    venv_python = os.path.join(REPO_ROOT, ".venv", "bin", "python")
+    if os.path.exists(venv_python):
+        return venv_python
+    return sys.executable
+
+
+def run(description, *command):
+    """Run a command from the repository root and report failures."""
+    result = subprocess.run(command, cwd=REPO_ROOT)
+    if result.returncode != 0:
+        print(f"pre-commit: {description} failed", file=sys.stderr)
+        return False
+    return True
+
+
+def main():
+    """Run the checks required before a commit is accepted."""
+    python = python_executable()
+    checks = [
+        (
+            "PEP 8 check",
+            (python, DEV_SCRIPT, "pycodestyle", "--staged"),
+        ),
+        (
+            "unit tests",
+            (python, DEV_SCRIPT, "test"),
+        ),
+    ]
+    for description, command in checks:
+        if not run(description, *command):
+            print("pre-commit: commit rejected", file=sys.stderr)
+            return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
