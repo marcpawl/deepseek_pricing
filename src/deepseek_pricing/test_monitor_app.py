@@ -14,7 +14,7 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from deepseek_pricing import DeepSeekMonitorApp, schedule  # noqa: E402
+from deepseek_pricing import gui, schedule  # noqa: E402
 
 UTC = ZoneInfo("UTC")
 
@@ -26,7 +26,7 @@ def utc(*args):
 
 def make_app():
     """Create an app instance without constructing the Tk window."""
-    return object.__new__(DeepSeekMonitorApp)
+    return object.__new__(gui.DeepSeekMonitorApp)
 
 
 class StatusColorTests(unittest.TestCase):
